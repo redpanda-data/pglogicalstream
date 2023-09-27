@@ -2,10 +2,10 @@ package simple
 
 import (
 	"fmt"
+	"github.com/usedatabrew/pglogicalstream"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 	"log"
-	"pglogicalstream"
 )
 
 func main() {

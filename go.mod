@@ -1,4 +1,4 @@
-module databrew/pglogicalstream
+module github.com/usedatabrew/pglogicalstream
 
 go 1.18
 

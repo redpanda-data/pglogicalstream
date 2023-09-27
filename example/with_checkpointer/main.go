@@ -2,10 +2,10 @@ package withcheckpointer
 
 import (
 	"fmt"
+	"github.com/usedatabrew/pglogicalstream"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
-	"pglogicalstream"
 )
 
 func main() {
