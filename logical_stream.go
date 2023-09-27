@@ -374,3 +374,15 @@ func (s *Stream) SnapshotMessageC() chan []byte {
 func (s *Stream) LrMessageC() chan []byte {
 	return s.messages
 }
+
+func (s *Stream) Stop() error {
+	if s.pgConn != nil {
+		if s.ctx != nil {
+			s.cancel()
+		}
+
+		return s.pgConn.Close(context.TODO())
+	}
+
+	return nil
+}
