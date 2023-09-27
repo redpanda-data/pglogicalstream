@@ -1,4 +1,4 @@
-# PostgreSQL Logical Replication CDC Module for Go
+# PostgreSQL Logical Replication CDC Module for Go [![Go](https://github.com/usedatabrew/pglogicalstream/actions/workflows/go.yml/badge.svg)](https://github.com/usedatabrew/pglogicalstream/actions/workflows/go.yml)
 
 <img src='./images/databrew-logo.png' width="200px" align="middle" >
 
