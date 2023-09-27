@@ -6,6 +6,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 	"log"
+	"strings"
 )
 
 func main() {
@@ -24,6 +25,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	fmt.Println(strings.Join([]string{"rides", "test"}, ","))
 
 	pgStream.OnMessage(func(message []byte) {
 		fmt.Println(string(message))

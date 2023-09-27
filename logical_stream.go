@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -81,7 +82,13 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	}
 
 	// TODO:: ADD Tables filter
-	result = stream.pgConn.Exec(context.Background(), fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s FOR ALL TABLES;", config.ReplicationSlotName))
+	for i, table := range config.DbTables {
+		config.DbTables[i] = fmt.Sprintf("%s.%s", config.DbSchema, table)
+	}
+
+	tablesSchemaFilter := fmt.Sprintf("FOR TABLE %s", strings.Join(config.DbTables, ","))
+	fmt.Println("Create publication for tables", fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
+	result = stream.pgConn.Exec(context.Background(), fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
 	_, err = result.ReadAll()
 	if err != nil {
 		log.Fatalln("create publication error", err)
