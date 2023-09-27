@@ -1,5 +1,7 @@
 # PostgreSQL Logical Replication CDC Module for Go
 
+<img src='./images/databrew-logo.png' width="200px" align="middle" >
+
 This Go module builds upon [github.com/jackc/pglogrepl](https://github.com/jackc/pglogrepl) to provide an advanced
 logical replication solution for PostgreSQL. It extends the capabilities of jackc/pglogrep for logical replication by
 introducing several key features, making it easier to implement Change Data Capture (CDC) in your Go-based applications.
@@ -95,7 +97,7 @@ will be stored automatically
 ```go
 checkPointer, err := NewPgStreamCheckPointer("redis.com:port", "user", "password")
 if err != nil {
-log.Fatalf("Checkpointer error")
+    log.Fatalf("Checkpointer error")
 }
 pgStream, err := pglogicalstream.NewPgStream(config, checkPointer)
 ```
@@ -104,8 +106,8 @@ pgStream, err := pglogicalstream.NewPgStream(config, checkPointer)
 
 ```go
 type CheckPointer interface {
-SetCheckPoint(lsn, slot string) error
-GetCheckPoint(slot string) string
+    SetCheckPoint(lsn, slot string) error
+    GetCheckPoint(slot string) string
 }
 ```
 
