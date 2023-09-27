@@ -1,4 +1,4 @@
-db_host: product-testing-instance.c2nq63ptnoe7.eu-north-1.rds.amazonaws.com
+db_host: 
 db_password: Lorem123
 db_user: postgres
 db_port: 5432
