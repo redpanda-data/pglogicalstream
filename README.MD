@@ -25,7 +25,7 @@ Follow these steps to get started with our PostgreSQL Logical Replication CDC Mo
 
 ```go
 import (
-"github.com/usedatabrew/pglogicalstream"
+    "github.com/usedatabrew/pglogicalstream"
 )
 
 ```
