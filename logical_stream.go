@@ -263,7 +263,7 @@ func (s *Stream) processSnapshot() {
 	for _, table := range s.tables {
 		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
 		var snapshotRows *sql.Rows
-		if snapshotRows, err = snapshotter.QuerySnapshotData(s.schema, table); err != nil {
+		if snapshotRows, err = snapshotter.QuerySnapshotData(table); err != nil {
 			log.Fatalln("Can't query snapshot data", err)
 		}
 

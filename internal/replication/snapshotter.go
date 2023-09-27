@@ -54,9 +54,8 @@ func (s *Snapshotter) Prepare() error {
 	return nil
 }
 
-func (s *Snapshotter) QuerySnapshotData(schema, table string) (rows *sql.Rows, err error) {
-	fmt.Println(fmt.Sprintf("SELECT * FROM %s.%s;", schema, table), "Snapshot query")
-	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s.%s;", schema, table))
+func (s *Snapshotter) QuerySnapshotData(table string) (rows *sql.Rows, err error) {
+	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s;", table))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {
