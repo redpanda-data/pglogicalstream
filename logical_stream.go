@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"log"
-	"pglogicalstream/internal/replication"
 	"time"
 )
 

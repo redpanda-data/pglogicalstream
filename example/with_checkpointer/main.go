@@ -1,4 +1,4 @@
-package withcheckpointer
+package main
 
 import (
 	"fmt"

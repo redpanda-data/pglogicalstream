@@ -1,11 +1,11 @@
 db_host:
-db_password: Lorem123
-db_user: postgres
-db_port: 5432
-db_name: mocks
-db_schema: public
+db_password:
+db_user:
+db_port:
+db_name:
+db_schema:
 db_tables:
-  - rides
-replication_slot_name: morning_elephant
+  -
+replication_slot_name:
 tls_verify: require
 stream_old_data: true
