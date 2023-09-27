@@ -33,6 +33,7 @@ type Stream struct {
 	messages                   chan []byte
 	snapshotMessages           chan []byte
 	snapshotName               string
+	changeFilter               replication.ChangeFilter
 	lsnrestart                 pglogrepl.LSN
 	slotName                   string
 	schema                     string
@@ -73,6 +74,7 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		schema:           config.DbSchema,
 		tables:           config.DbTables,
 		checkPointer:     checkpointer,
+		changeFilter:     replication.NewChangeFilter(config.DbTables, config.DbSchema),
 	}
 
 	result := stream.pgConn.Exec(context.Background(), fmt.Sprintf("DROP PUBLICATION IF EXISTS pglog_stream_%s;", config.ReplicationSlotName))
@@ -239,7 +241,8 @@ func (s *Stream) streamMessagesAsync() {
 					}
 				}
 
-				s.messages <- xld.WALData
+				filteredChanges := s.changeFilter.FilterChange(xld.WALData)
+				s.messages <- filteredChanges
 			}
 		}
 	}
