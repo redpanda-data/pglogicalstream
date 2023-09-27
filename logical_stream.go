@@ -184,7 +184,7 @@ func (s *Stream) streamMessagesAsync() {
 				if err != nil {
 					log.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
 				}
-				log.Println("Sent Standby status message at %s\n", s.clientXLogPos.String())
+				log.Printf("Sent Standby status message at %s\n", s.clientXLogPos.String())
 				s.nextStandbyMessageDeadline = time.Now().Add(s.standbyMessageTimeout)
 			}
 
