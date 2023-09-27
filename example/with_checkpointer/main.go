@@ -20,7 +20,11 @@ func main() {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	pgStream, err := pglogicalstream.NewPgStream(config, nil)
+	checkPointer, err := NewPgStreamCheckPointer("redis.com:port", "user", "password")
+	if err != nil {
+		log.Fatalf("Checkpointer error")
+	}
+	pgStream, err := pglogicalstream.NewPgStream(config, checkPointer)
 	if err != nil {
 		panic(err)
 	}

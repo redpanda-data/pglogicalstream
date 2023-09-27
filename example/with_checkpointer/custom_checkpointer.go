@@ -26,7 +26,7 @@ func NewPgStreamCheckPointer(addr, user, password string) (*PgStreamCheckPointer
 	}, nil
 }
 
-func (p *PgStreamCheckPointer) SaveCheckPoint(lnsCheckPoint, replicationSlot string) error {
+func (p *PgStreamCheckPointer) SetCheckPoint(lnsCheckPoint, replicationSlot string) error {
 	return p.redisConn.Set(fmt.Sprintf("databrew_checkpoint_%s", replicationSlot), lnsCheckPoint, 0).Err()
 }
 
