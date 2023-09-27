@@ -9,6 +9,9 @@
 *.so
 *.dylib
 
+example/simple/config.yaml
+example/with_checkpointer/config.yaml
+
 # Test binary, built with `go test -c`
 *.test
 
