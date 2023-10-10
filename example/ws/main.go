@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"github.com/gorilla/websocket"
 	"github.com/usedatabrew/pglogicalstream"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
@@ -25,7 +25,17 @@ func main() {
 		panic(err)
 	}
 
+	wsClient, _, err := websocket.DefaultDialer.Dial("ws://localhost:10000/ws", nil)
+	if err != nil {
+		panic(err)
+	}
+	defer wsClient.Close()
+
 	pgStream.OnMessage(func(message []byte) {
-		fmt.Println(string(message))
+		err := wsClient.WriteMessage(websocket.TextMessage, message)
+		if err != nil {
+			log.Println("write:", err)
+			return
+		}
 	})
 }
