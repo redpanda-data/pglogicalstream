@@ -16,4 +16,5 @@ type Config struct {
 	ReplicationSlotName string    `yaml:"replication_slot_name"`
 	TlsVerify           TlsVerify `yaml:"tls_verify"`
 	StreamOldData       bool      `yaml:"stream_old_data"`
+	SeparateChanges     bool      `yaml:"separate_changes"`
 }

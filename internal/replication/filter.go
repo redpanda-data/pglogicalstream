@@ -11,6 +11,8 @@ type ChangeFilter struct {
 	schemaWhiteList string
 }
 
+type Filtered func(change []byte)
+
 func NewChangeFilter(tables []string, schema string) ChangeFilter {
 	tablesMap := map[string]string{}
 	for _, table := range tables {
@@ -23,27 +25,44 @@ func NewChangeFilter(tables []string, schema string) ChangeFilter {
 	}
 }
 
-func (c ChangeFilter) FilterChange(change []byte) []byte {
+func (c ChangeFilter) FilterChange(change []byte, split bool, OnFiltered Filtered) {
 	var changes Wal2JsonChanges
 	if err := json.NewDecoder(bytes.NewReader(change)).Decode(&changes); err != nil {
 		panic(fmt.Errorf("cant parse change from database to filter it %v", err))
 	}
 
-	var filteredChanges = Wal2JsonChanges{Changes: []Wal2JsonChange{}}
-	for _, ch := range changes.Changes {
-		if ch.Schema != c.schemaWhiteList {
-			continue
+	if split {
+		for _, ch := range changes.Changes {
+			var filteredChanges = Wal2JsonChanges{Changes: []Wal2JsonChange{}}
+			if ch.Schema != c.schemaWhiteList {
+				continue
+			}
+			if _, ok := c.tablesWhiteList[ch.Table]; !ok {
+				continue
+			}
+			filteredChanges.Changes = append(filteredChanges.Changes, ch)
+			result, err := json.Marshal(&filteredChanges)
+			if err != nil {
+				panic(fmt.Errorf("cant marshal change after filtering %v", err))
+			}
+			OnFiltered(result)
 		}
-		if _, ok := c.tablesWhiteList[ch.Table]; !ok {
-			continue
+	} else {
+		var filteredChanges = Wal2JsonChanges{Changes: []Wal2JsonChange{}}
+		for _, ch := range changes.Changes {
+			if ch.Schema != c.schemaWhiteList {
+				continue
+			}
+			if _, ok := c.tablesWhiteList[ch.Table]; !ok {
+				continue
+			}
+			filteredChanges.Changes = append(filteredChanges.Changes, ch)
 		}
-		filteredChanges.Changes = append(filteredChanges.Changes, ch)
-	}
 
-	result, err := json.Marshal(&filteredChanges)
-	if err != nil {
-		panic(fmt.Errorf("cant marshal change after filtering %v", err))
+		result, err := json.Marshal(&filteredChanges)
+		if err != nil {
+			panic(fmt.Errorf("cant marshal change after filtering %v", err))
+		}
+		OnFiltered(result)
 	}
-
-	return result
 }

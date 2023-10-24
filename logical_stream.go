@@ -38,6 +38,7 @@ type Stream struct {
 	slotName                   string
 	schema                     string
 	tables                     []string
+	separateChanges            bool
 }
 
 func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
@@ -74,6 +75,7 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		schema:           config.DbSchema,
 		tables:           config.DbTables,
 		checkPointer:     checkpointer,
+		separateChanges:  config.SeparateChanges,
 		changeFilter:     replication.NewChangeFilter(config.DbTables, config.DbSchema),
 	}
 
@@ -214,7 +216,6 @@ func (s *Stream) streamMessagesAsync() {
 				if err != nil {
 					log.Fatalln("ParsePrimaryKeepaliveMessage failed:", err)
 				}
-				fmt.Println("Primary Keepalive Message =>", "ServerWALEnd:", pkm.ServerWALEnd, "ServerTime:", pkm.ServerTime, "ReplyRequested:", pkm.ReplyRequested)
 
 				if pkm.ReplyRequested {
 					s.nextStandbyMessageDeadline = time.Time{}
@@ -241,8 +242,9 @@ func (s *Stream) streamMessagesAsync() {
 					}
 				}
 
-				filteredChanges := s.changeFilter.FilterChange(xld.WALData)
-				s.messages <- filteredChanges
+				s.changeFilter.FilterChange(xld.WALData, s.separateChanges, func(change []byte) {
+					s.messages <- change
+				})
 			}
 		}
 	}
