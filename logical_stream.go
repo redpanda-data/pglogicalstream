@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
+	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"log"
 	"strings"
@@ -39,6 +40,7 @@ type Stream struct {
 	schema                     string
 	tables                     []string
 	separateChanges            bool
+	snapshotBatchSize          int
 }
 
 func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
@@ -267,87 +269,109 @@ func (s *Stream) processSnapshot() {
 
 	for _, table := range s.tables {
 		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
-		var snapshotRows *sql.Rows
-		if snapshotRows, err = snapshotter.QuerySnapshotData(table); err != nil {
-			log.Fatalln("Can't query snapshot data", err)
-		}
 
-		columnTypes, err := snapshotRows.ColumnTypes()
-		var columnTypesString = make([]string, len(columnTypes))
-		columnNames, err := snapshotRows.Columns()
-		for i, _ := range columnNames {
-			columnTypesString[i] = columnTypes[i].DatabaseTypeName()
-		}
+		var (
+			avgRowSizeBytes sql.NullInt64
+			offset          = 0
+		)
+		// extract only the name of the table
+		rawTableName := strings.Split(table, ".")[1]
+		avgRowSizeBytes = snapshotter.FindAvgRowSize(rawTableName)
+		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
-		if err != nil {
-			panic(err)
-		}
+		batchSize := snapshotter.CalculateBatchSize(helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
+		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 
-		count := len(columnTypes)
-
-		for snapshotRows.Next() {
-			scanArgs := make([]interface{}, count)
-			for i, v := range columnTypes {
-				switch v.DatabaseTypeName() {
-				case "VARCHAR", "TEXT", "UUID", "TIMESTAMP":
-					scanArgs[i] = new(sql.NullString)
-					break
-				case "BOOL":
-					scanArgs[i] = new(sql.NullBool)
-					break
-				case "INT4":
-					scanArgs[i] = new(sql.NullInt64)
-					break
-				default:
-					scanArgs[i] = new(sql.NullString)
-				}
+		for {
+			var snapshotRows *sql.Rows
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table, batchSize, offset); err != nil {
+				log.Fatalln("Can't query snapshot data", err)
 			}
 
-			err := snapshotRows.Scan(scanArgs...)
+			columnTypes, err := snapshotRows.ColumnTypes()
+			var columnTypesString = make([]string, len(columnTypes))
+			columnNames, err := snapshotRows.Columns()
+			for i, _ := range columnNames {
+				columnTypesString[i] = columnTypes[i].DatabaseTypeName()
+			}
 
 			if err != nil {
 				panic(err)
 			}
 
-			var columnValues = make([]interface{}, len(columnTypes))
-			for i, _ := range columnTypes {
-				if z, ok := (scanArgs[i]).(*sql.NullBool); ok {
-					columnValues[i] = z.Bool
-					continue
+			count := len(columnTypes)
+			var rowsCount = 0
+			for snapshotRows.Next() {
+				rowsCount += 1
+				scanArgs := make([]interface{}, count)
+				for i, v := range columnTypes {
+					switch v.DatabaseTypeName() {
+					case "VARCHAR", "TEXT", "UUID", "TIMESTAMP":
+						scanArgs[i] = new(sql.NullString)
+						break
+					case "BOOL":
+						scanArgs[i] = new(sql.NullBool)
+						break
+					case "INT4":
+						scanArgs[i] = new(sql.NullInt64)
+						break
+					default:
+						scanArgs[i] = new(sql.NullString)
+					}
 				}
-				if z, ok := (scanArgs[i]).(*sql.NullString); ok {
-					columnValues[i] = z.String
-					continue
+
+				err := snapshotRows.Scan(scanArgs...)
+
+				if err != nil {
+					panic(err)
 				}
-				if z, ok := (scanArgs[i]).(*sql.NullInt64); ok {
-					columnValues[i] = z.Int64
-					continue
+
+				var columnValues = make([]interface{}, len(columnTypes))
+				for i, _ := range columnTypes {
+					if z, ok := (scanArgs[i]).(*sql.NullBool); ok {
+						columnValues[i] = z.Bool
+						continue
+					}
+					if z, ok := (scanArgs[i]).(*sql.NullString); ok {
+						columnValues[i] = z.String
+						continue
+					}
+					if z, ok := (scanArgs[i]).(*sql.NullInt64); ok {
+						columnValues[i] = z.Int64
+						continue
+					}
+					if z, ok := (scanArgs[i]).(*sql.NullFloat64); ok {
+						columnValues[i] = z.Float64
+						continue
+					}
+					if z, ok := (scanArgs[i]).(*sql.NullInt32); ok {
+						columnValues[i] = z.Int32
+						continue
+					}
+					columnValues[i] = scanArgs[i]
 				}
-				if z, ok := (scanArgs[i]).(*sql.NullFloat64); ok {
-					columnValues[i] = z.Float64
-					continue
+
+				var snapshotChanges []replication.Wal2JsonChange
+				snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
+					Kind:         "insert",
+					Schema:       s.schema,
+					Table:        table,
+					ColumnNames:  columnNames,
+					ColumnTypes:  columnTypesString,
+					ColumnValues: columnValues,
+				})
+				snapshotChangePacket := replication.Wal2JsonChanges{
+					Changes: snapshotChanges,
 				}
-				if z, ok := (scanArgs[i]).(*sql.NullInt32); ok {
-					columnValues[i] = z.Int32
-					continue
-				}
-				columnValues[i] = scanArgs[i]
+				changePacket, _ := json.Marshal(&snapshotChangePacket)
+				s.snapshotMessages <- changePacket
 			}
 
-			var snapshotChanges []replication.Wal2JsonChange
-			snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
-				Kind:         "insert",
-				Schema:       s.schema,
-				Table:        table,
-				ColumnNames:  columnNames,
-				ColumnTypes:  columnTypesString,
-				ColumnValues: columnValues,
-			})
-			snapshotChangePacket := replication.Wal2JsonChanges{
-				Changes: snapshotChanges,
+			offset += batchSize
+
+			if batchSize != rowsCount {
+				break
 			}
-			changePacket, _ := json.Marshal(&snapshotChangePacket)
-			s.snapshotMessages <- changePacket
 		}
 
 	}

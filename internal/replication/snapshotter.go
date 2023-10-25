@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
+	"log"
 )
 
 type Wal2JsonChanges struct {
@@ -54,8 +55,38 @@ func (s *Snapshotter) Prepare() error {
 	return nil
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string) (rows *sql.Rows, err error) {
-	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s;", table))
+func (s *Snapshotter) FindAvgRowSize(table string) sql.NullInt64 {
+	var avgRowSize sql.NullInt64
+
+	if rows, err := s.pgConnection.Query(fmt.Sprintf(`SELECT SUM(pg_column_size('%s.*')) / COUNT(*) FROM %s;`, table, table)); err != nil {
+		log.Fatal("Can get avg row size", err)
+	} else {
+		if rows.Next() {
+			if err = rows.Scan(&avgRowSize); err != nil {
+				log.Fatal("Can get avg row size", err)
+			}
+		} else {
+			log.Fatal("Can get avg row size; 0 rows returned")
+		}
+	}
+
+	return avgRowSize
+}
+
+func (s *Snapshotter) CalculateBatchSize(availableMemory uint64, estimatedRowSize uint64) int {
+	// Adjust this factor based on your system's memory constraints.
+	// This example uses a safety factor of 0.8 to leave some memory headroom.
+	safetyFactor := 0.6
+	batchSize := int(float64(availableMemory) * safetyFactor / float64(estimatedRowSize))
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	return batchSize
+}
+
+func (s *Snapshotter) QuerySnapshotData(table string, limit, offset int) (rows *sql.Rows, err error) {
+	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
+	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {
