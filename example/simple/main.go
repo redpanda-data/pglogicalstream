@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/usedatabrew/pglogicalstream"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
@@ -25,6 +26,6 @@ func main() {
 	}
 
 	pgStream.OnMessage(func(message []byte) {
-		//fmt.Println(string(message))
+		fmt.Println(string(message))
 	})
 }

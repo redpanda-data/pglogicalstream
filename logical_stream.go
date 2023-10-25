@@ -41,6 +41,7 @@ type Stream struct {
 	tables                     []string
 	separateChanges            bool
 	snapshotBatchSize          int
+	snapshotMemorySafetyFactor float64
 }
 
 func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
@@ -69,16 +70,17 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	}
 
 	stream := &Stream{
-		pgConn:           dbConn,
-		dbConfig:         *cfg,
-		messages:         make(chan []byte),
-		snapshotMessages: make(chan []byte, 100),
-		slotName:         config.ReplicationSlotName,
-		schema:           config.DbSchema,
-		tables:           config.DbTables,
-		checkPointer:     checkpointer,
-		separateChanges:  config.SeparateChanges,
-		changeFilter:     replication.NewChangeFilter(config.DbTables, config.DbSchema),
+		pgConn:                     dbConn,
+		dbConfig:                   *cfg,
+		messages:                   make(chan []byte),
+		snapshotMessages:           make(chan []byte, 100),
+		slotName:                   config.ReplicationSlotName,
+		schema:                     config.DbSchema,
+		tables:                     config.DbTables,
+		checkPointer:               checkpointer,
+		snapshotMemorySafetyFactor: config.SnapshotMemorySafetyFactor,
+		separateChanges:            config.SeparateChanges,
+		changeFilter:               replication.NewChangeFilter(config.DbTables, config.DbSchema),
 	}
 
 	result := stream.pgConn.Exec(context.Background(), fmt.Sprintf("DROP PUBLICATION IF EXISTS pglog_stream_%s;", config.ReplicationSlotName))
@@ -279,7 +281,7 @@ func (s *Stream) processSnapshot() {
 		avgRowSizeBytes = snapshotter.FindAvgRowSize(rawTableName)
 		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
-		batchSize := snapshotter.CalculateBatchSize(helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
+		batchSize := snapshotter.CalculateBatchSize(s.snapshotMemorySafetyFactor, helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 
 		for {
