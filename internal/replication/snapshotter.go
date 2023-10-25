@@ -73,10 +73,9 @@ func (s *Snapshotter) FindAvgRowSize(table string) sql.NullInt64 {
 	return avgRowSize
 }
 
-func (s *Snapshotter) CalculateBatchSize(availableMemory uint64, estimatedRowSize uint64) int {
+func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory uint64, estimatedRowSize uint64) int {
 	// Adjust this factor based on your system's memory constraints.
 	// This example uses a safety factor of 0.8 to leave some memory headroom.
-	safetyFactor := 0.6
 	batchSize := int(float64(availableMemory) * safetyFactor / float64(estimatedRowSize))
 	if batchSize < 1 {
 		batchSize = 1
