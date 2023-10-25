@@ -281,7 +281,12 @@ func (s *Stream) processSnapshot() {
 		avgRowSizeBytes = snapshotter.FindAvgRowSize(rawTableName)
 		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
-		batchSize := snapshotter.CalculateBatchSize(s.snapshotMemorySafetyFactor, helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
+		var batchSize int
+		if s.snapshotBatchSize > 0 {
+			batchSize = s.snapshotBatchSize
+		} else {
+			batchSize = snapshotter.CalculateBatchSize(s.snapshotMemorySafetyFactor, helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
+		}
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 
 		for {

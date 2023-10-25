@@ -18,4 +18,5 @@ type Config struct {
 	StreamOldData              bool      `yaml:"stream_old_data"`
 	SeparateChanges            bool      `yaml:"separate_changes"`
 	SnapshotMemorySafetyFactor float64   `yaml:"snapshot_memory_safety_factor"`
+	BatchSize                  int       `yaml:"batch_size"`
 }
