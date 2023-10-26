@@ -6,7 +6,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/apache/arrow/go/v14/arrow"
+	"github.com/apache/arrow/go/v14/arrow/array"
+	"github.com/apache/arrow/go/v14/arrow/memory"
+	"github.com/cloudquery/plugin-sdk/v4/scalar"
 	"github.com/jackc/pglogrepl"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
@@ -261,13 +266,53 @@ func (s *Stream) processSnapshot() {
 	if err = snapshotter.Prepare(); err != nil {
 		log.Fatalln("Can't prepare database snapshot", err)
 	}
-
-	// After we finished. We must release snapshot connection
-	// We have to commit transaction and close DB connection
 	defer func() {
 		snapshotter.ReleaseSnapshot()
 		snapshotter.CloseConn()
 	}()
+
+	tableSchema := arrow.NewSchema([]arrow.Field{
+		{
+			Name: "flight_id",
+			Type: arrow.PrimitiveTypes.Int64,
+		},
+		{
+			Name: "flight_number",
+			Type: arrow.PrimitiveTypes.Int64,
+		},
+		{
+			Name: "departure_airport",
+			Type: arrow.BinaryTypes.String,
+		},
+		{
+			Name: "arrival_airport",
+			Type: arrow.BinaryTypes.String,
+		},
+		{
+			Name: "departure_date",
+			Type: arrow.FixedWidthTypes.Date32,
+		},
+		{
+			Name: "arrival_date",
+			Type: arrow.BinaryTypes.String,
+		},
+		{
+			Name: "departure_time",
+			Type: arrow.BinaryTypes.String,
+		},
+		{
+			Name: "arrival_time",
+			Type: arrow.BinaryTypes.String,
+		},
+		{
+			Name: "flight_duration",
+			Type: arrow.PrimitiveTypes.Float64,
+		},
+		{
+			Name: "flight_status",
+			Type: arrow.BinaryTypes.String,
+		},
+	}, nil)
 
 	for _, table := range s.tables {
 		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
@@ -276,96 +321,41 @@ func (s *Stream) processSnapshot() {
 			avgRowSizeBytes sql.NullInt64
 			offset          = 0
 		)
-		// extract only the name of the table
-		rawTableName := strings.Split(table, ".")[1]
-		avgRowSizeBytes = snapshotter.FindAvgRowSize(rawTableName)
-		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
-		var batchSize int
-		if s.snapshotBatchSize > 0 {
-			batchSize = s.snapshotBatchSize
-		} else {
-			batchSize = snapshotter.CalculateBatchSize(s.snapshotMemorySafetyFactor, helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
-		}
+		var batchSize = 10000
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, tableSchema)
 
 		for {
-			var snapshotRows *sql.Rows
+			var snapshotRows pgx.Rows
 			if snapshotRows, err = snapshotter.QuerySnapshotData(table, batchSize, offset); err != nil {
 				log.Fatalln("Can't query snapshot data", err)
 			}
 
-			columnTypes, err := snapshotRows.ColumnTypes()
-			var columnTypesString = make([]string, len(columnTypes))
-			columnNames, err := snapshotRows.Columns()
-			for i, _ := range columnNames {
-				columnTypesString[i] = columnTypes[i].DatabaseTypeName()
-			}
-
-			if err != nil {
-				panic(err)
-			}
-
-			count := len(columnTypes)
 			var rowsCount = 0
 			for snapshotRows.Next() {
 				rowsCount += 1
-				scanArgs := make([]interface{}, count)
-				for i, v := range columnTypes {
-					switch v.DatabaseTypeName() {
-					case "VARCHAR", "TEXT", "UUID", "TIMESTAMP":
-						scanArgs[i] = new(sql.NullString)
-						break
-					case "BOOL":
-						scanArgs[i] = new(sql.NullBool)
-						break
-					case "INT4":
-						scanArgs[i] = new(sql.NullInt64)
-						break
-					default:
-						scanArgs[i] = new(sql.NullString)
-					}
-				}
 
-				err := snapshotRows.Scan(scanArgs...)
-
+				values, err := snapshotRows.Values()
 				if err != nil {
 					panic(err)
 				}
 
-				var columnValues = make([]interface{}, len(columnTypes))
-				for i, _ := range columnTypes {
-					if z, ok := (scanArgs[i]).(*sql.NullBool); ok {
-						columnValues[i] = z.Bool
-						continue
+				for i, v := range values {
+					s := scalar.NewScalar(tableSchema.Field(i).Type)
+					if err := s.Set(v); err != nil {
+						panic(err)
 					}
-					if z, ok := (scanArgs[i]).(*sql.NullString); ok {
-						columnValues[i] = z.String
-						continue
-					}
-					if z, ok := (scanArgs[i]).(*sql.NullInt64); ok {
-						columnValues[i] = z.Int64
-						continue
-					}
-					if z, ok := (scanArgs[i]).(*sql.NullFloat64); ok {
-						columnValues[i] = z.Float64
-						continue
-					}
-					if z, ok := (scanArgs[i]).(*sql.NullInt32); ok {
-						columnValues[i] = z.Int32
-						continue
-					}
-					columnValues[i] = scanArgs[i]
+
+					scalar.AppendToBuilder(builder.Field(i), s)
 				}
 
 				var snapshotChanges []replication.Wal2JsonChange
 				snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
-					Kind:         "insert",
-					Schema:       s.schema,
-					Table:        table,
-					ColumnNames:  columnNames,
-					ColumnTypes:  columnTypesString,
-					ColumnValues: columnValues,
+					Kind:   "insert",
+					Schema: s.schema,
+					Table:  table,
+					Row:    builder.NewRecord(),
 				})
 				snapshotChangePacket := replication.Wal2JsonChanges{
 					Changes: snapshotChanges,
@@ -373,6 +363,8 @@ func (s *Stream) processSnapshot() {
 				changePacket, _ := json.Marshal(&snapshotChangePacket)
 				s.snapshotMessages <- changePacket
 			}
+
+			snapshotRows.Close()
 
 			offset += batchSize
 
