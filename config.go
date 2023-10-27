@@ -5,15 +5,17 @@ type TlsVerify string
 const TlsNoVerify TlsVerify = "none"
 const TlsRequireVerify TlsVerify = "require"
 
+type DbSchemaColumn struct {
+	Name                string `yaml:"name"`
+	DatabrewType        string `yaml:"databrewType"`
+	NativeConnectorType string `yaml:"nativeConnectorType"`
+	Pk                  bool   `yaml:"pk"`
+	Nullable            bool   `yaml:"nullable"`
+}
+
 type DbTablesSchema struct {
-	Table   string `yaml:"table"`
-	Columns []struct {
-		Name                string `yaml:"name"`
-		DatabrewType        string `yaml:"databrewType"`
-		NativeConnectorType string `yaml:"nativeConnectorType"`
-		Pk                  bool   `yaml:"pk"`
-		Nullable            bool   `yaml:"nullable"`
-	} `yaml:"columns"`
+	Table   string           `yaml:"table"`
+	Columns []DbSchemaColumn `yaml:"columns"`
 }
 
 type Config struct {
