@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
+	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 	"log"
 	"strings"
 	"time"
@@ -43,7 +44,8 @@ type Stream struct {
 	lsnrestart                 pglogrepl.LSN
 	slotName                   string
 	schema                     string
-	tables                     []string
+	tableSchemas               []schemas.DataTableSchema
+	tableNames                 []string
 	separateChanges            bool
 	snapshotBatchSize          int
 	snapshotMemorySafetyFactor float64
@@ -74,6 +76,25 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		return nil, err
 	}
 
+	var tableNames []string
+	var dataSchemas []schemas.DataTableSchema
+	for _, table := range config.DbTablesSchema {
+		tableNames = append(tableNames, strings.Split(table.Table, ".")[1])
+		var dts schemas.DataTableSchema
+		dts.TableName = table.Table
+		var arrowSchemaFields []arrow.Field
+		for _, col := range table.Columns {
+			arrowSchemaFields = append(arrowSchemaFields, arrow.Field{
+				Name:     col.Name,
+				Type:     helpers.MapPlainTypeToArrow(col.DatabrewType),
+				Nullable: col.Nullable,
+				Metadata: arrow.Metadata{},
+			})
+		}
+		dts.Schema = arrow.NewSchema(arrowSchemaFields, nil)
+		dataSchemas = append(dataSchemas, dts)
+	}
+
 	stream := &Stream{
 		pgConn:                     dbConn,
 		dbConfig:                   *cfg,
@@ -81,11 +102,12 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		snapshotMessages:           make(chan []byte, 100),
 		slotName:                   config.ReplicationSlotName,
 		schema:                     config.DbSchema,
-		tables:                     config.DbTables,
+		tableSchemas:               dataSchemas,
 		checkPointer:               checkpointer,
 		snapshotMemorySafetyFactor: config.SnapshotMemorySafetyFactor,
 		separateChanges:            config.SeparateChanges,
-		changeFilter:               replication.NewChangeFilter(config.DbTables, config.DbSchema),
+		tableNames:                 tableNames,
+		changeFilter:               replication.NewChangeFilter(dataSchemas, config.DbSchema),
 	}
 
 	result := stream.pgConn.Exec(context.Background(), fmt.Sprintf("DROP PUBLICATION IF EXISTS pglog_stream_%s;", config.ReplicationSlotName))
@@ -95,12 +117,12 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	}
 
 	// TODO:: ADD Tables filter
-	for i, table := range config.DbTables {
-		config.DbTables[i] = fmt.Sprintf("%s.%s", config.DbSchema, table)
+	for i, table := range tableNames {
+		tableNames[i] = fmt.Sprintf("%s.%s", config.DbSchema, table)
 	}
 
-	tablesSchemaFilter := fmt.Sprintf("FOR TABLE %s", strings.Join(config.DbTables, ","))
-	fmt.Println("Create publication for tables", fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
+	tablesSchemaFilter := fmt.Sprintf("FOR TABLE %s", strings.Join(tableNames, ","))
+	fmt.Println("Create publication for tableSchemas", fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
 	result = stream.pgConn.Exec(context.Background(), fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
 	_, err = result.ReadAll()
 	if err != nil {
@@ -251,7 +273,7 @@ func (s *Stream) streamMessagesAsync() {
 					}
 				}
 
-				s.changeFilter.FilterChange(xld.WALData, s.separateChanges, func(change []byte) {
+				s.changeFilter.FilterChange(xld.WALData, func(change []byte) {
 					s.messages <- change
 				})
 			}
@@ -271,50 +293,7 @@ func (s *Stream) processSnapshot() {
 		snapshotter.CloseConn()
 	}()
 
-	tableSchema := arrow.NewSchema([]arrow.Field{
-		{
-			Name: "flight_id",
-			Type: arrow.PrimitiveTypes.Int64,
-		},
-		{
-			Name: "flight_number",
-			Type: arrow.PrimitiveTypes.Int64,
-		},
-		{
-			Name: "departure_airport",
-			Type: arrow.BinaryTypes.String,
-		},
-		{
-			Name: "arrival_airport",
-			Type: arrow.BinaryTypes.String,
-		},
-		{
-			Name: "departure_date",
-			Type: arrow.FixedWidthTypes.Date32,
-		},
-		{
-			Name: "arrival_date",
-			Type: arrow.BinaryTypes.String,
-		},
-		{
-			Name: "departure_time",
-			Type: arrow.BinaryTypes.String,
-		},
-		{
-			Name: "arrival_time",
-			Type: arrow.BinaryTypes.String,
-		},
-		{
-			Name: "flight_duration",
-			Type: arrow.PrimitiveTypes.Float64,
-		},
-		{
-			Name: "flight_status",
-			Type: arrow.BinaryTypes.String,
-		},
-	}, nil)
-
-	for _, table := range s.tables {
+	for _, table := range s.tableSchemas {
 		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
 
 		var (
@@ -324,11 +303,11 @@ func (s *Stream) processSnapshot() {
 
 		var batchSize = 10000
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
-		builder := array.NewRecordBuilder(memory.DefaultAllocator, tableSchema)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
 
 		for {
 			var snapshotRows pgx.Rows
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table, batchSize, offset); err != nil {
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, batchSize, offset); err != nil {
 				log.Fatalln("Can't query snapshot data", err)
 			}
 
@@ -342,7 +321,7 @@ func (s *Stream) processSnapshot() {
 				}
 
 				for i, v := range values {
-					s := scalar.NewScalar(tableSchema.Field(i).Type)
+					s := scalar.NewScalar(table.Schema.Field(i).Type)
 					if err := s.Set(v); err != nil {
 						panic(err)
 					}
@@ -354,7 +333,7 @@ func (s *Stream) processSnapshot() {
 				snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
 					Kind:   "insert",
 					Schema: s.schema,
-					Table:  table,
+					Table:  table.TableName,
 					Row:    builder.NewRecord(),
 				})
 				snapshotChangePacket := replication.Wal2JsonChanges{
