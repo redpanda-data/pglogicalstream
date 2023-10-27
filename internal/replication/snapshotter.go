@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
 	"log"
+	"strings"
 )
 
 type Wal2JsonChanges struct {
@@ -87,9 +88,10 @@ func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory u
 	return batchSize
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string, limit, offset int) (rows pgx.Rows, err error) {
-	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
-	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
+func (s *Snapshotter) QuerySnapshotData(table string, columns []string, limit, offset int) (rows pgx.Rows, err error) {
+	joinedColumns := strings.Join(columns, ", ")
+	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;", joinedColumns, table, limit, offset))
+	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;", joinedColumns, table, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {

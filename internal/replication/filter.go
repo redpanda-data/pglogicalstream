@@ -59,12 +59,12 @@ func (c ChangeFilter) FilterChange(change []byte, OnFiltered Filtered) {
 		}
 
 		arrowSchema := c.tablesWhiteList[ch.Table]
-		for i, _ := range ch.Columnnames {
-			field := arrowSchema.Field(i)
-			value := changesMap[field.Name]
+		for i, arrowField := range arrowSchema.Fields() {
+			fieldName := arrowField.Name
+			value := changesMap[fieldName]
 			s := scalar.NewScalar(arrowSchema.Field(i).Type)
 			if err := s.Set(value); err != nil {
-				panic(fmt.Errorf("error setting value for column %s: %w", field.Name, err))
+				panic(fmt.Errorf("error setting value for column %s: %w", arrowField.Name, err))
 			}
 
 			scalar.AppendToBuilder(builder.Field(i), s)
