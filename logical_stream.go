@@ -305,9 +305,14 @@ func (s *Stream) processSnapshot() {
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
 
+		colNames := make([]string, 0, len(table.Schema.Fields()))
+		for _, col := range table.Schema.Fields() {
+			colNames = append(colNames, pgx.Identifier{col.Name}.Sanitize())
+		}
+
 		for {
 			var snapshotRows pgx.Rows
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, batchSize, offset); err != nil {
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, batchSize, offset); err != nil {
 				log.Fatalln("Can't query snapshot data", err)
 			}
 
@@ -333,7 +338,7 @@ func (s *Stream) processSnapshot() {
 				snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
 					Kind:   "insert",
 					Schema: s.schema,
-					Table:  table.TableName,
+					Table:  strings.Split(table.TableName, ".")[1],
 					Row:    builder.NewRecord(),
 				})
 				snapshotChangePacket := replication.Wal2JsonChanges{
