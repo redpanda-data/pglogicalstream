@@ -16,10 +16,10 @@ type Wal2JsonChanges struct {
 }
 
 type Wal2JsonChange struct {
-	Kind   string `json:"kind"`
+	Kind   string `json:"action"`
 	Schema string `json:"schema"`
 	Table  string `json:"table"`
-	Row    any    `json:"row"`
+	Row    any    `json:"data"`
 }
 
 type Snapshotter struct {
