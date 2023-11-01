@@ -1,3 +1,5 @@
 package pglogicalstream
 
-type OnMessage = func(message []byte)
+import "github.com/usedatabrew/pglogicalstream/internal/replication"
+
+type OnMessage = func(message replication.Wal2JsonChanges)

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/usedatabrew/pglogicalstream"
+	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"gopkg.in/DataDog/dd-trace-go.v1/profiler"
 	"gopkg.in/yaml.v3"
@@ -55,7 +56,7 @@ func main() {
 		panic(err)
 	}
 
-	pgStream.OnMessage(func(message []byte) {
-		fmt.Println(string(message))
+	pgStream.OnMessage(func(message replication.Wal2JsonChanges) {
+		fmt.Println(message.Changes)
 	})
 }
