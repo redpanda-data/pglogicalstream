@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
@@ -37,8 +36,8 @@ type Stream struct {
 	clientXLogPos              pglogrepl.LSN
 	standbyMessageTimeout      time.Duration
 	nextStandbyMessageDeadline time.Time
-	messages                   chan []byte
-	snapshotMessages           chan []byte
+	messages                   chan replication.Wal2JsonChanges
+	snapshotMessages           chan replication.Wal2JsonChanges
 	snapshotName               string
 	changeFilter               replication.ChangeFilter
 	lsnrestart                 pglogrepl.LSN
@@ -98,8 +97,8 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	stream := &Stream{
 		pgConn:                     dbConn,
 		dbConfig:                   *cfg,
-		messages:                   make(chan []byte),
-		snapshotMessages:           make(chan []byte, 100),
+		messages:                   make(chan replication.Wal2JsonChanges),
+		snapshotMessages:           make(chan replication.Wal2JsonChanges, 100),
 		slotName:                   config.ReplicationSlotName,
 		schema:                     config.DbSchema,
 		tableSchemas:               dataSchemas,
@@ -273,7 +272,7 @@ func (s *Stream) streamMessagesAsync() {
 					}
 				}
 
-				s.changeFilter.FilterChange(xld.WALData, func(change []byte) {
+				s.changeFilter.FilterChange(xld.WALData, func(change replication.Wal2JsonChanges) {
 					s.messages <- change
 				})
 			}
@@ -333,19 +332,18 @@ func (s *Stream) processSnapshot() {
 
 					scalar.AppendToBuilder(builder.Field(i), s)
 				}
-
-				var snapshotChanges []replication.Wal2JsonChange
-				snapshotChanges = append(snapshotChanges, replication.Wal2JsonChange{
-					Kind:   "insert",
-					Schema: s.schema,
-					Table:  strings.Split(table.TableName, ".")[1],
-					Row:    builder.NewRecord(),
-				})
-				snapshotChangePacket := replication.Wal2JsonChanges{
-					Changes: snapshotChanges,
+				var snapshotChanges = replication.Wal2JsonChanges{
+					Changes: []replication.Wal2JsonChange{
+						{
+							Kind:   "insert",
+							Schema: s.schema,
+							Table:  strings.Split(table.TableName, ".")[1],
+							Row:    builder.NewRecord(),
+						},
+					},
 				}
-				changePacket, _ := json.Marshal(&snapshotChangePacket)
-				s.snapshotMessages <- changePacket
+
+				s.snapshotMessages <- snapshotChanges
 			}
 
 			snapshotRows.Close()
@@ -376,11 +374,11 @@ func (s *Stream) OnMessage(callback OnMessage) {
 	}
 }
 
-func (s *Stream) SnapshotMessageC() chan []byte {
+func (s *Stream) SnapshotMessageC() chan replication.Wal2JsonChanges {
 	return s.snapshotMessages
 }
 
-func (s *Stream) LrMessageC() chan []byte {
+func (s *Stream) LrMessageC() chan replication.Wal2JsonChanges {
 	return s.messages
 }
 

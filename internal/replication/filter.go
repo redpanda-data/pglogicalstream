@@ -17,7 +17,7 @@ type ChangeFilter struct {
 	schemaWhiteList string
 }
 
-type Filtered func(change []byte)
+type Filtered func(change Wal2JsonChanges)
 
 func NewChangeFilter(tableSchemas []schemas.DataTableSchema, schema string) ChangeFilter {
 	tablesMap := map[string]*arrow.Schema{}
@@ -77,10 +77,6 @@ func (c ChangeFilter) FilterChange(change []byte, OnFiltered Filtered) {
 			Row:    builder.NewRecord(),
 		})
 
-		result, err := json.Marshal(&filteredChanges)
-		if err != nil {
-			panic(fmt.Errorf("cant marshal change after filtering %v", err))
-		}
-		OnFiltered(result)
+		OnFiltered(filteredChanges)
 	}
 }
