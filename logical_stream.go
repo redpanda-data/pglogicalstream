@@ -138,12 +138,11 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	var freshlyCreatedSlot = false
 	var confirmedLSNFromDB string
 	// check is replication slot exist to get last restart SLN
-	connExecResult := stream.pgConn.Exec(context.TODO(), fmt.Sprintf("SELECT restart_lsn FROM pg_replication_slots WHERE slot_name = '%s'", config.ReplicationSlotName))
+	connExecResult := stream.pgConn.Exec(context.TODO(), fmt.Sprintf("SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '%s'", config.ReplicationSlotName))
 	if slotCheckResults, err := connExecResult.ReadAll(); err != nil {
 		log.Fatalln(err)
 	} else {
 		if len(slotCheckResults) == 0 || len(slotCheckResults[0].Rows) == 0 {
-			fmt.Println(stream.slotName)
 			// here we create a new replication slot because there is no slot found
 			var createSlotResult replication.CreateReplicationSlotResult
 			createSlotResult, err = replication.CreateReplicationSlot(context.Background(), stream.pgConn, stream.slotName, outputPlugin,
@@ -158,16 +157,7 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		} else {
 			slotCheckRow := slotCheckResults[0].Rows[0]
 			confirmedLSNFromDB = string(slotCheckRow[0])
-
-			if stream.checkPointer != nil {
-				lsnFromStorage := stream.checkPointer.GetCheckPoint(config.ReplicationSlotName)
-				if lsnFromStorage != "" {
-					fmt.Printf("Extracted checkpoint from storage %s", lsnFromStorage)
-					confirmedLSNFromDB = lsnFromStorage
-				} else {
-					log.Printf("Extracted restart lsn from db %s", confirmedLSNFromDB)
-				}
-			}
+			log.Printf("Extracted restart lsn from db %s", confirmedLSNFromDB)
 		}
 	}
 
@@ -179,7 +169,13 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 	}
 
 	stream.lsnrestart = lsnrestart
-	stream.clientXLogPos = sysident.XLogPos
+
+	if freshlyCreatedSlot {
+		stream.clientXLogPos = sysident.XLogPos
+	} else {
+		stream.clientXLogPos = lsnrestart
+	}
+
 	stream.standbyMessageTimeout = time.Second * 10
 	stream.nextStandbyMessageDeadline = time.Now().Add(stream.standbyMessageTimeout)
 	stream.ctx, stream.cancel = context.WithCancel(context.Background())
@@ -204,15 +200,38 @@ func (s *Stream) startLr() {
 	log.Println("Logical replication started on slot", s.slotName)
 }
 
+func (s *Stream) AckLSN(lsn string) {
+	var err error
+	s.clientXLogPos, err = pglogrepl.ParseLSN(lsn)
+	if err != nil {
+		log.Fatalln("Can't parse LSN for ack")
+	}
+
+	err = pglogrepl.SendStandbyStatusUpdate(context.Background(), s.pgConn, pglogrepl.StandbyStatusUpdate{
+		WALWritePosition: s.clientXLogPos,
+		WALFlushPosition: s.clientXLogPos,
+	})
+
+	if err != nil {
+		log.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
+	}
+	log.Printf("Sent Standby status message at %s\n", s.clientXLogPos.String())
+	s.nextStandbyMessageDeadline = time.Now().Add(s.standbyMessageTimeout)
+}
+
 func (s *Stream) streamMessagesAsync() {
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.cancel()
 			return
 		default:
 			if time.Now().After(s.nextStandbyMessageDeadline) {
 				var err error
-				err = pglogrepl.SendStandbyStatusUpdate(context.Background(), s.pgConn, pglogrepl.StandbyStatusUpdate{WALWritePosition: s.clientXLogPos})
+				err = pglogrepl.SendStandbyStatusUpdate(context.Background(), s.pgConn, pglogrepl.StandbyStatusUpdate{
+					WALWritePosition: s.clientXLogPos,
+				})
+
 				if err != nil {
 					log.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
 				}
@@ -222,7 +241,7 @@ func (s *Stream) streamMessagesAsync() {
 
 			ctx, cancel := context.WithDeadline(context.Background(), s.nextStandbyMessageDeadline)
 			rawMsg, err := s.pgConn.ReceiveMessage(ctx)
-			cancel()
+			s.cancel = cancel
 			if err != nil {
 				if pgconn.Timeout(err) {
 					continue
@@ -251,28 +270,13 @@ func (s *Stream) streamMessagesAsync() {
 					s.nextStandbyMessageDeadline = time.Time{}
 				}
 
-				if s.checkPointer != nil {
-					err := s.checkPointer.SetCheckPoint(pkm.ServerWALEnd.String(), s.slotName)
-					if err != nil {
-						fmt.Println("Failed to store checkpoint", s.clientXLogPos.String())
-					}
-				}
-
 			case pglogrepl.XLogDataByteID:
 				xld, err := pglogrepl.ParseXLogData(msg.Data[1:])
 				if err != nil {
 					log.Fatalln("ParseXLogData failed:", err)
 				}
-
-				s.clientXLogPos = xld.WALStart + pglogrepl.LSN(len(xld.WALData))
-				if s.checkPointer != nil {
-					err := s.checkPointer.SetCheckPoint(s.clientXLogPos.String(), s.slotName)
-					if err != nil {
-						fmt.Println("Failed to store checkpoint", s.clientXLogPos.String())
-					}
-				}
-
-				s.changeFilter.FilterChange(xld.WALData, func(change replication.Wal2JsonChanges) {
+				clientXLogPos := xld.WALStart + pglogrepl.LSN(len(xld.WALData))
+				s.changeFilter.FilterChange(clientXLogPos.String(), xld.WALData, func(change replication.Wal2JsonChanges) {
 					s.messages <- change
 				})
 			}
@@ -333,6 +337,7 @@ func (s *Stream) processSnapshot() {
 					scalar.AppendToBuilder(builder.Field(i), s)
 				}
 				var snapshotChanges = replication.Wal2JsonChanges{
+					Lsn: "",
 					Changes: []replication.Wal2JsonChange{
 						{
 							Kind:   "insert",

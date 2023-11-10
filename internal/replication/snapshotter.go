@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
@@ -12,14 +13,15 @@ import (
 )
 
 type Wal2JsonChanges struct {
+	Lsn     string
 	Changes []Wal2JsonChange `json:"change"`
 }
 
 type Wal2JsonChange struct {
-	Kind   string `json:"action"`
-	Schema string `json:"schema"`
-	Table  string `json:"table"`
-	Row    any    `json:"data"`
+	Kind   string       `json:"action"`
+	Schema string       `json:"schema"`
+	Table  string       `json:"table"`
+	Row    arrow.Record `json:"data"`
 }
 
 type Snapshotter struct {
