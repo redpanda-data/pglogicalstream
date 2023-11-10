@@ -31,14 +31,17 @@ func NewChangeFilter(tableSchemas []schemas.DataTableSchema, schema string) Chan
 	}
 }
 
-func (c ChangeFilter) FilterChange(change []byte, OnFiltered Filtered) {
+func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtered) {
 	var changes WallMessage
 	if err := json.NewDecoder(bytes.NewReader(change)).Decode(&changes); err != nil {
 		panic(fmt.Errorf("cant parse change from database to filter it %v", err))
 	}
 
 	for _, ch := range changes.Change {
-		var filteredChanges = Wal2JsonChanges{Changes: []Wal2JsonChange{}}
+		var filteredChanges = Wal2JsonChanges{
+			Lsn:     lsn,
+			Changes: []Wal2JsonChange{},
+		}
 		if ch.Schema != c.schemaWhiteList {
 			continue
 		}
