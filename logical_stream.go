@@ -26,8 +26,7 @@ const outputPlugin = "wal2json"
 var pluginArguments = []string{"\"pretty-print\" 'true'"}
 
 type Stream struct {
-	pgConn       *pgconn.PgConn
-	checkPointer CheckPointer
+	pgConn *pgconn.PgConn
 	// extra copy of db config is required to establish a new db connection
 	// which is required to take snapshot data
 	dbConfig                   pgconn.Config
@@ -50,7 +49,7 @@ type Stream struct {
 	snapshotMemorySafetyFactor float64
 }
 
-func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
+func NewPgStream(config Config) (*Stream, error) {
 	var (
 		cfg *pgconn.Config
 		err error
@@ -102,7 +101,6 @@ func NewPgStream(config Config, checkpointer CheckPointer) (*Stream, error) {
 		slotName:                   config.ReplicationSlotName,
 		schema:                     config.DbSchema,
 		tableSchemas:               dataSchemas,
-		checkPointer:               checkpointer,
 		snapshotMemorySafetyFactor: config.SnapshotMemorySafetyFactor,
 		separateChanges:            config.SeparateChanges,
 		tableNames:                 tableNames,
