@@ -103,6 +103,7 @@ func NewPgStream(config Config) (*Stream, error) {
 		tableSchemas:               dataSchemas,
 		snapshotMemorySafetyFactor: config.SnapshotMemorySafetyFactor,
 		separateChanges:            config.SeparateChanges,
+		snapshotBatchSize:          config.BatchSize,
 		tableNames:                 tableNames,
 		changeFilter:               replication.NewChangeFilter(dataSchemas, config.DbSchema),
 	}
@@ -302,8 +303,7 @@ func (s *Stream) processSnapshot() {
 			offset          = 0
 		)
 
-		var batchSize = 10000
-		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
+		fmt.Println("Query with batch size", s.snapshotBatchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
 
 		colNames := make([]string, 0, len(table.Schema.Fields()))
@@ -313,7 +313,7 @@ func (s *Stream) processSnapshot() {
 
 		for {
 			var snapshotRows pgx.Rows
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, batchSize, offset); err != nil {
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, s.snapshotBatchSize, offset); err != nil {
 				log.Fatalln("Can't query snapshot data", err)
 			}
 
