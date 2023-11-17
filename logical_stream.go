@@ -351,9 +351,9 @@ func (s *Stream) processSnapshot() {
 
 			snapshotRows.Close()
 
-			offset += batchSize
+			offset += s.snapshotBatchSize
 
-			if batchSize != rowsCount {
+			if s.snapshotBatchSize != rowsCount {
 				break
 			}
 		}
