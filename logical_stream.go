@@ -317,6 +317,7 @@ func (s *Stream) processSnapshot() {
 
 		for {
 			var snapshotRows pgx.Rows
+			fmt.Println("Query snapshot: ", "table", table.TableName, "columns", colNames, "batch-size", s.snapshotBatchSize, "offset", offset)
 			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, s.snapshotBatchSize, offset); err != nil {
 				s.logger.Errorf("Failed to query snapshot data %s", err.Error())
 				s.cleanUpOnFailure()

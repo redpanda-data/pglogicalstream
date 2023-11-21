@@ -92,7 +92,6 @@ func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory u
 
 func (s *Snapshotter) QuerySnapshotData(table string, columns []string, limit, offset int) (rows pgx.Rows, err error) {
 	joinedColumns := strings.Join(columns, ", ")
-	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;", joinedColumns, table, limit, offset))
 	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;", joinedColumns, table, limit, offset))
 }
 
