@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/log"
 	"github.com/usedatabrew/pglogicalstream"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
-	"log"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	pgStream, err := pglogicalstream.NewPgStream(config)
+	pgStream, err := pglogicalstream.NewPgStream(config, log.WithPrefix("pg-cdc"))
 	if err != nil {
 		panic(err)
 	}
