@@ -3,11 +3,11 @@ package pglogicalstream
 import (
 	"context"
 	"crypto/tls"
-	"database/sql"
 	"fmt"
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
 	"github.com/apache/arrow/go/v14/arrow/memory"
+	"github.com/charmbracelet/log"
 	"github.com/cloudquery/plugin-sdk/v4/scalar"
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
@@ -16,7 +16,7 @@ import (
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
-	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -47,9 +47,10 @@ type Stream struct {
 	separateChanges            bool
 	snapshotBatchSize          int
 	snapshotMemorySafetyFactor float64
+	logger                     *log.Logger
 }
 
-func NewPgStream(config Config) (*Stream, error) {
+func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 	var (
 		cfg *pgconn.Config
 		err error
@@ -106,12 +107,13 @@ func NewPgStream(config Config) (*Stream, error) {
 		snapshotBatchSize:          config.BatchSize,
 		tableNames:                 tableNames,
 		changeFilter:               replication.NewChangeFilter(dataSchemas, config.DbSchema),
+		logger:                     logger,
 	}
 
 	result := stream.pgConn.Exec(context.Background(), fmt.Sprintf("DROP PUBLICATION IF EXISTS pglog_stream_%s;", config.ReplicationSlotName))
 	_, err = result.ReadAll()
 	if err != nil {
-		log.Fatalln("drop publication if exists error", err)
+		stream.logger.Errorf("drop publication if exists error %s", err.Error())
 	}
 
 	// TODO:: ADD Tables filter
@@ -124,22 +126,23 @@ func NewPgStream(config Config) (*Stream, error) {
 	result = stream.pgConn.Exec(context.Background(), fmt.Sprintf("CREATE PUBLICATION pglog_stream_%s %s;", config.ReplicationSlotName, tablesSchemaFilter))
 	_, err = result.ReadAll()
 	if err != nil {
-		log.Fatalln("create publication error", err)
+		stream.logger.Fatalf("create publication error %s", err.Error())
 	}
-	log.Println("created publication", config.ReplicationSlotName)
+	stream.logger.Info("Created Postgresql publication", "publication_name", config.ReplicationSlotName)
 
 	sysident, err := pglogrepl.IdentifySystem(context.Background(), stream.pgConn)
 	if err != nil {
-		log.Fatalln("IdentifySystem failed:", err)
+		stream.logger.Fatalf("Failed to identify the system %s", err.Error())
 	}
-	log.Println("SystemID:", sysident.SystemID, "Timeline:", sysident.Timeline, "XLogPos:", sysident.XLogPos, "DBName:", sysident.DBName)
+
+	stream.logger.Info("System identification result", "SystemID:", sysident.SystemID, "Timeline:", sysident.Timeline, "XLogPos:", sysident.XLogPos, "DBName:", sysident.DBName)
 
 	var freshlyCreatedSlot = false
 	var confirmedLSNFromDB string
 	// check is replication slot exist to get last restart SLN
 	connExecResult := stream.pgConn.Exec(context.TODO(), fmt.Sprintf("SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '%s'", config.ReplicationSlotName))
 	if slotCheckResults, err := connExecResult.ReadAll(); err != nil {
-		log.Fatalln(err)
+		stream.logger.Fatal(err)
 	} else {
 		if len(slotCheckResults) == 0 || len(slotCheckResults[0].Rows) == 0 {
 			// here we create a new replication slot because there is no slot found
@@ -149,14 +152,14 @@ func NewPgStream(config Config) (*Stream, error) {
 					SnapshotAction: "export",
 				})
 			if err != nil {
-				log.Fatalln("CreateReplicationSlot failed:", err)
+				stream.logger.Fatalf("Failed to create replication slot for the database: %s", err.Error())
 			}
 			stream.snapshotName = createSlotResult.SnapshotName
 			freshlyCreatedSlot = true
 		} else {
 			slotCheckRow := slotCheckResults[0].Rows[0]
 			confirmedLSNFromDB = string(slotCheckRow[0])
-			log.Printf("Extracted restart lsn from db %s", confirmedLSNFromDB)
+			stream.logger.Info("Replication slot restart LSN extracted from DB", "LSN", confirmedLSNFromDB)
 		}
 	}
 
@@ -194,16 +197,16 @@ func (s *Stream) startLr() {
 	var err error
 	err = pglogrepl.StartReplication(context.Background(), s.pgConn, s.slotName, s.lsnrestart, pglogrepl.StartReplicationOptions{PluginArgs: pluginArguments})
 	if err != nil {
-		log.Fatalln("StartReplication failed:", err)
+		s.logger.Fatalf("Starting replication slot failed: %s", err.Error())
 	}
-	log.Println("Logical replication started on slot", s.slotName)
+	s.logger.Info("Started logical replication on slot", "slot-name", s.slotName)
 }
 
 func (s *Stream) AckLSN(lsn string) {
 	var err error
 	s.clientXLogPos, err = pglogrepl.ParseLSN(lsn)
 	if err != nil {
-		log.Fatalln("Can't parse LSN for ack")
+		s.logger.Fatalf("Failed to parse LSN for Acknowledge %s", err.Error())
 	}
 
 	err = pglogrepl.SendStandbyStatusUpdate(context.Background(), s.pgConn, pglogrepl.StandbyStatusUpdate{
@@ -212,9 +215,9 @@ func (s *Stream) AckLSN(lsn string) {
 	})
 
 	if err != nil {
-		log.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
+		s.logger.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
 	}
-	log.Printf("Sent Standby status message at %s\n", s.clientXLogPos.String())
+	s.logger.Debugf("Sent Standby status message at LSN#%s", s.clientXLogPos.String())
 	s.nextStandbyMessageDeadline = time.Now().Add(s.standbyMessageTimeout)
 }
 
@@ -232,9 +235,9 @@ func (s *Stream) streamMessagesAsync() {
 				})
 
 				if err != nil {
-					log.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
+					s.logger.Fatalf("SendStandbyStatusUpdate failed: %s", err.Error())
 				}
-				log.Printf("Sent Standby status message at %s\n", s.clientXLogPos.String())
+				s.logger.Debugf("Sent Standby status message at LSN#%s", s.clientXLogPos.String())
 				s.nextStandbyMessageDeadline = time.Now().Add(s.standbyMessageTimeout)
 			}
 
@@ -245,16 +248,16 @@ func (s *Stream) streamMessagesAsync() {
 				if pgconn.Timeout(err) {
 					continue
 				}
-				log.Fatalln("ReceiveMessage failed:", err)
+				s.logger.Fatalf("Failed to receive messages from PostgreSQL %s", err.Error())
 			}
 
 			if errMsg, ok := rawMsg.(*pgproto3.ErrorResponse); ok {
-				log.Fatalf("received Postgres WAL error: %+v", errMsg)
+				s.logger.Fatalf("Received broken Postgres WAL. Error: %+v", errMsg)
 			}
 
 			msg, ok := rawMsg.(*pgproto3.CopyData)
 			if !ok {
-				log.Printf("Received unexpected message: %T\n", rawMsg)
+				s.logger.Warnf("Received unexpected message: %T\n", rawMsg)
 				continue
 			}
 
@@ -262,7 +265,7 @@ func (s *Stream) streamMessagesAsync() {
 			case pglogrepl.PrimaryKeepaliveMessageByteID:
 				pkm, err := pglogrepl.ParsePrimaryKeepaliveMessage(msg.Data[1:])
 				if err != nil {
-					log.Fatalln("ParsePrimaryKeepaliveMessage failed:", err)
+					s.logger.Fatalf("ParsePrimaryKeepaliveMessage failed: %s", err.Error())
 				}
 
 				if pkm.ReplyRequested {
@@ -272,7 +275,7 @@ func (s *Stream) streamMessagesAsync() {
 			case pglogrepl.XLogDataByteID:
 				xld, err := pglogrepl.ParseXLogData(msg.Data[1:])
 				if err != nil {
-					log.Fatalln("ParseXLogData failed:", err)
+					s.logger.Fatalf("ParseXLogData failed: %s", err.Error())
 				}
 				clientXLogPos := xld.WALStart + pglogrepl.LSN(len(xld.WALData))
 				s.changeFilter.FilterChange(clientXLogPos.String(), xld.WALData, func(change replication.Wal2JsonChanges) {
@@ -285,10 +288,14 @@ func (s *Stream) streamMessagesAsync() {
 func (s *Stream) processSnapshot() {
 	snapshotter, err := replication.NewSnapshotter(s.dbConfig, s.snapshotName)
 	if err != nil {
-		log.Fatalln("Can't init database snapshot", err)
+		s.logger.Errorf("Failed to create database snapshot: %", err.Error())
+		s.cleanUpOnFailure()
+		os.Exit(1)
 	}
 	if err = snapshotter.Prepare(); err != nil {
-		log.Fatalln("Can't prepare database snapshot", err)
+		s.logger.Errorf("Failed to prepare database snapshot: %", err.Error())
+		s.cleanUpOnFailure()
+		os.Exit(1)
 	}
 	defer func() {
 		snapshotter.ReleaseSnapshot()
@@ -296,14 +303,11 @@ func (s *Stream) processSnapshot() {
 	}()
 
 	for _, table := range s.tableSchemas {
-		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
+		s.logger.Info("Processing database snapshot", "schema", s.schema, "table", table)
 
-		var (
-			avgRowSizeBytes sql.NullInt64
-			offset          = 0
-		)
+		var offset = 0
 
-		fmt.Println("Query with batch size", s.snapshotBatchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
+		s.logger.Info("Query snapshot", "batch-size", s.snapshotBatchSize)
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
 
 		colNames := make([]string, 0, len(table.Schema.Fields()))
@@ -314,7 +318,9 @@ func (s *Stream) processSnapshot() {
 		for {
 			var snapshotRows pgx.Rows
 			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, s.snapshotBatchSize, offset); err != nil {
-				log.Fatalln("Can't query snapshot data", err)
+				s.logger.Errorf("Failed to query snapshot data %s", err.Error())
+				s.cleanUpOnFailure()
+				os.Exit(1)
 			}
 
 			var rowsCount = 0
@@ -383,6 +389,16 @@ func (s *Stream) SnapshotMessageC() chan replication.Wal2JsonChanges {
 
 func (s *Stream) LrMessageC() chan replication.Wal2JsonChanges {
 	return s.messages
+}
+
+// cleanUpOnFailure drops replication slot and publication if database snapshotting was failed for any reason
+func (s *Stream) cleanUpOnFailure() {
+	s.logger.Warn("Cleaning up resources on accident.", "replication-slot", s.slotName)
+	err := replication.DropReplicationSlot(context.Background(), s.pgConn, s.slotName, replication.DropReplicationSlotOptions{Wait: true})
+	if err != nil {
+		s.logger.Errorf("Failed to drop replication slot: %s", err.Error())
+	}
+	s.pgConn.Close(context.TODO())
 }
 
 func (s *Stream) Stop() error {
