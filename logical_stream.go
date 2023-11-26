@@ -307,10 +307,16 @@ func (s *Stream) processSnapshot() {
 
 		var offset = 0
 
+		pk, err := s.getPrimaryKeyColumn(table.TableName)
+		if err != nil {
+			s.logger.Fatalf("Failed to resolve pk %s", err.Error())
+		}
+
 		s.logger.Info("Query snapshot", "batch-size", s.snapshotBatchSize)
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
 
 		colNames := make([]string, 0, len(table.Schema.Fields()))
+
 		for _, col := range table.Schema.Fields() {
 			colNames = append(colNames, pgx.Identifier{col.Name}.Sanitize())
 		}
@@ -318,7 +324,7 @@ func (s *Stream) processSnapshot() {
 		for {
 			var snapshotRows pgx.Rows
 			s.logger.Info("Query snapshot: ", "table", table.TableName, "columns", colNames, "batch-size", s.snapshotBatchSize, "offset", offset)
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, s.snapshotBatchSize, offset); err != nil {
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, pk, s.snapshotBatchSize, offset); err != nil {
 				s.logger.Errorf("Failed to query snapshot data %s", err.Error())
 				s.cleanUpOnFailure()
 				os.Exit(1)
@@ -400,6 +406,27 @@ func (s *Stream) cleanUpOnFailure() {
 		s.logger.Errorf("Failed to drop replication slot: %s", err.Error())
 	}
 	s.pgConn.Close(context.TODO())
+}
+
+func (s *Stream) getPrimaryKeyColumn(tableName string) (string, error) {
+	q := fmt.Sprintf(`
+		SELECT a.attname
+		FROM   pg_index i
+		JOIN   pg_attribute a ON a.attrelid = i.indrelid
+							 AND a.attnum = ANY(i.indkey)
+		WHERE  i.indrelid = '%s'::regclass
+		AND    i.indisprimary;	
+	`, strings.Split(tableName, ".")[1])
+
+	reader := s.pgConn.Exec(context.Background(), q)
+	data, err := reader.ReadAll()
+	if err != nil {
+		return "", err
+	}
+
+	pkResultRow := data[0].Rows[0]
+	pkColName := string(pkResultRow[0])
+	return pkColName, nil
 }
 
 func (s *Stream) Stop() error {
