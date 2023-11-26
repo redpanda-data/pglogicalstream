@@ -90,9 +90,9 @@ func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory u
 	return batchSize
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string, columns []string, limit, offset int) (rows pgx.Rows, err error) {
+func (s *Snapshotter) QuerySnapshotData(table string, columns []string, pk string, limit, offset int) (rows pgx.Rows, err error) {
 	joinedColumns := strings.Join(columns, ", ")
-	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;", joinedColumns, table, limit, offset))
+	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT %d OFFSET %d;", joinedColumns, table, pk, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {
