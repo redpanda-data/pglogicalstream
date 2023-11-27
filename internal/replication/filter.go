@@ -37,6 +37,10 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 		panic(fmt.Errorf("cant parse change from database to filter it %v", err))
 	}
 
+	if len(changes.Change) == 0 {
+		return
+	}
+
 	for _, ch := range changes.Change {
 		var filteredChanges = Wal2JsonChanges{
 			Lsn:     lsn,
@@ -57,8 +61,14 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowTableSchema)
 		changesMap := map[string]interface{}{}
-		for i, changedValue := range ch.Columnvalues {
-			changesMap[ch.Columnnames[i]] = changedValue
+		if ch.Kind == "delete" {
+			for i, changedValue := range ch.Oldkeys.Keyvalues {
+				changesMap[ch.Oldkeys.Keynames[i]] = changedValue
+			}
+		} else {
+			for i, changedValue := range ch.Columnvalues {
+				changesMap[ch.Columnnames[i]] = changedValue
+			}
 		}
 
 		arrowSchema := c.tablesWhiteList[ch.Table]
