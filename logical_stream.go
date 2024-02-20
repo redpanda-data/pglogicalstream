@@ -64,9 +64,11 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 	)); err != nil {
 		return nil, err
 	}
+
 	if config.TlsVerify == TlsRequireVerify {
 		cfg.TLSConfig = &tls.Config{
 			InsecureSkipVerify: true,
+			ServerName:         config.DbHost,
 		}
 	}
 
