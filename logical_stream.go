@@ -55,12 +55,19 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		cfg *pgconn.Config
 		err error
 	)
-	if cfg, err = pgconn.ParseConfig(fmt.Sprintf("postgres://%s:%s@%s:%d/%s?replication=database",
+
+	sslVerifyFull := ""
+	if config.TlsVerify == TlsRequireVerify {
+		sslVerifyFull = "?sslmode=verify-full"
+	}
+
+	if cfg, err = pgconn.ParseConfig(fmt.Sprintf("postgres://%s:%s@%s:%d/%s?replication=database%s",
 		config.DbUser,
 		config.DbPassword,
 		config.DbHost,
 		config.DbPort,
 		config.DbName,
+		sslVerifyFull,
 	)); err != nil {
 		return nil, err
 	}
