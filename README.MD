@@ -76,16 +76,16 @@ func main() {
     log.Fatalf("Unmarshal: %v", err)
   }
 
-  pgStream, err := pglogicalstream.NewPgStream(config, nil)
+  pgStream, err := pglogicalstream.NewPgStream(config, log.WithPrefix("pg-cdc"))
   if err != nil {
     panic(err)
   }
 
-  // Listen to messages here
-  pgStream.OnMessage(func(message []byte) {
-    fmt.Println(string(message))
+  pgStream.OnMessage(func(message messages.Wal2JsonChanges) {
+    fmt.Println(message.Changes)
   })
 }
+
 ```
 
 ### Example with checkpointer
@@ -100,64 +100,6 @@ if err != nil {
     log.Fatalf("Checkpointer error")
 }
 pgStream, err := pglogicalstream.NewPgStream(config, checkPointer)
-```
-
-### Enable checkpoints by implementing CheckPointer inteface
-
-```go
-type CheckPointer interface {
-    SetCheckPoint(lsn, slot string) error
-    GetCheckPoint(slot string) string
-}
-```
-
-### Checkpointer implementation example
-
-```go
-package main
-
-import (
-  "fmt"
-  "github.com/go-redis/redis/v7"
-)
-
-type PgStreamCheckPointer struct {
-  redisConn *redis.Client
-}
-
-func NewPgStreamCheckPointer(addr, user, password string) (*PgStreamCheckPointer, error) {
-  client := redis.NewClient(&redis.Options{
-    Addr:     addr,
-    Username: user,
-    Password: password,
-  })
-  conn := client.Conn()
-  result := conn.Ping()
-  if result.Err() != nil {
-    return nil, result.Err()
-  }
-
-  return &PgStreamCheckPointer{
-    redisConn: client,
-  }, nil
-}
-
-func (p *PgStreamCheckPointer) SaveCheckPoint(lnsCheckPoint, replicationSlot string) error {
-  return p.redisConn.Set(fmt.Sprintf("databrew_checkpoint_%s", replicationSlot), lnsCheckPoint, 0).Err()
-}
-
-func (p *PgStreamCheckPointer) GetCheckPoint(replicationSlot string) string {
-  result, _ := p.redisConn.Get(fmt.Sprintf("databrew_checkpoint_%s", replicationSlot)).Result()
-  return result
-}
-
-func (p *PgStreamCheckPointer) Close() error {
-  if p.redisConn != nil {
-    return p.redisConn.Close()
-  }
-
-  return nil
-}
 ```
 
 ## Contributing

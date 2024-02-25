@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"github.com/charmbracelet/log"
 	"github.com/usedatabrew/pglogicalstream"
-	"github.com/usedatabrew/pglogicalstream/internal/replication"
+	"github.com/usedatabrew/pglogicalstream/messages"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 )
 
 func main() {
-
 	var config pglogicalstream.Config
 	yamlFile, err := ioutil.ReadFile("./example/simple/config.yaml")
 	if err != nil {
@@ -27,7 +26,7 @@ func main() {
 		panic(err)
 	}
 
-	pgStream.OnMessage(func(message replication.Wal2JsonChanges) {
+	pgStream.OnMessage(func(message messages.Wal2JsonChanges) {
 		fmt.Println(message.Changes)
 	})
 }

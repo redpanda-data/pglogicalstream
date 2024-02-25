@@ -1,12 +1,12 @@
 package main
 
 import (
+	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 	"github.com/usedatabrew/pglogicalstream"
-	"github.com/usedatabrew/pglogicalstream/internal/replication"
+	"github.com/usedatabrew/pglogicalstream/messages"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
-	"log"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	pgStream, err := pglogicalstream.NewPgStream(config)
+	pgStream, err := pglogicalstream.NewPgStream(config, log.WithPrefix("pg-cdc"))
 	if err != nil {
 		panic(err)
 	}
@@ -32,7 +32,7 @@ func main() {
 	}
 	defer wsClient.Close()
 
-	pgStream.OnMessage(func(message replication.Wal2JsonChanges) {
+	pgStream.OnMessage(func(message messages.Wal2JsonChanges) {
 		marshaledChanges, err := message.Changes[0].Row.MarshalJSON()
 		if err != nil {
 			panic(err)
@@ -40,8 +40,7 @@ func main() {
 
 		err = wsClient.WriteMessage(websocket.TextMessage, marshaledChanges)
 		if err != nil {
-			log.Println("write:", err)
-			return
+			log.Fatalf("write: %v", err)
 		}
 	})
 }
