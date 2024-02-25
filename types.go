@@ -1,5 +1,7 @@
 package pglogicalstream
 
-import "github.com/usedatabrew/pglogicalstream/internal/replication"
+import (
+	"github.com/usedatabrew/pglogicalstream/messages"
+)
 
-type OnMessage = func(message replication.Wal2JsonChanges)
+type OnMessage = func(message messages.Wal2JsonChanges)
