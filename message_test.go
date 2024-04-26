@@ -1,4 +1,4 @@
-package replication
+package pglogicalstream
 
 import (
 	"encoding/binary"

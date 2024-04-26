@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
-	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 	"os"
 	"strings"
@@ -38,7 +37,7 @@ type Stream struct {
 	messages                   chan Wal2JsonChanges
 	snapshotMessages           chan Wal2JsonChanges
 	snapshotName               string
-	changeFilter               replication.ChangeFilter
+	changeFilter               ChangeFilter
 	lsnrestart                 pglogrepl.LSN
 	slotName                   string
 	schema                     string
@@ -124,7 +123,7 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		separateChanges:            config.SeparateChanges,
 		snapshotBatchSize:          config.BatchSize,
 		tableNames:                 tableNames,
-		changeFilter:               replication.NewChangeFilter(dataSchemas, config.DbSchema),
+		changeFilter:               NewChangeFilter(dataSchemas, config.DbSchema),
 		logger:                     logger,
 	}
 
@@ -164,9 +163,9 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 	} else {
 		if len(slotCheckResults) == 0 || len(slotCheckResults[0].Rows) == 0 {
 			// here we create a new replication slot because there is no slot found
-			var createSlotResult replication.CreateReplicationSlotResult
-			createSlotResult, err = replication.CreateReplicationSlot(context.Background(), stream.pgConn, stream.slotName, outputPlugin,
-				replication.CreateReplicationSlotOptions{Temporary: false,
+			var createSlotResult CreateReplicationSlotResult
+			createSlotResult, err = CreateReplicationSlot(context.Background(), stream.pgConn, stream.slotName, outputPlugin,
+				CreateReplicationSlotOptions{Temporary: false,
 					SnapshotAction: "export",
 				})
 			if err != nil {
@@ -304,7 +303,7 @@ func (s *Stream) streamMessagesAsync() {
 	}
 }
 func (s *Stream) processSnapshot() {
-	snapshotter, err := replication.NewSnapshotter(s.dbConfig, s.snapshotName)
+	snapshotter, err := NewSnapshotter(s.dbConfig, s.snapshotName)
 	if err != nil {
 		s.logger.Errorf("Failed to create database snapshot: %", err.Error())
 		s.cleanUpOnFailure()
@@ -419,7 +418,7 @@ func (s *Stream) LrMessageC() chan Wal2JsonChanges {
 // cleanUpOnFailure drops replication slot and publication if database snapshotting was failed for any reason
 func (s *Stream) cleanUpOnFailure() {
 	s.logger.Warn("Cleaning up resources on accident.", "replication-slot", s.slotName)
-	err := replication.DropReplicationSlot(context.Background(), s.pgConn, s.slotName, replication.DropReplicationSlotOptions{Wait: true})
+	err := DropReplicationSlot(context.Background(), s.pgConn, s.slotName, DropReplicationSlotOptions{Wait: true})
 	if err != nil {
 		s.logger.Errorf("Failed to drop replication slot: %s", err.Error())
 	}
