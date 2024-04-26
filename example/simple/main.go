@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/charmbracelet/log"
 	"github.com/usedatabrew/pglogicalstream"
-	"github.com/usedatabrew/pglogicalstream/messages"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 )
@@ -26,7 +25,7 @@ func main() {
 		panic(err)
 	}
 
-	pgStream.OnMessage(func(message messages.Wal2JsonChanges) {
+	pgStream.OnMessage(func(message pglogicalstream.Wal2JsonChanges) {
 		fmt.Println(message.Changes)
 	})
 }
