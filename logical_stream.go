@@ -16,7 +16,6 @@ import (
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/replication"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
-	"github.com/usedatabrew/pglogicalstream/messages"
 	"os"
 	"strings"
 	"time"
@@ -36,8 +35,8 @@ type Stream struct {
 	clientXLogPos              pglogrepl.LSN
 	standbyMessageTimeout      time.Duration
 	nextStandbyMessageDeadline time.Time
-	messages                   chan messages.Wal2JsonChanges
-	snapshotMessages           chan messages.Wal2JsonChanges
+	messages                   chan Wal2JsonChanges
+	snapshotMessages           chan Wal2JsonChanges
 	snapshotName               string
 	changeFilter               replication.ChangeFilter
 	lsnrestart                 pglogrepl.LSN
@@ -116,8 +115,8 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 	stream := &Stream{
 		pgConn:                     dbConn,
 		dbConfig:                   *cfg,
-		messages:                   make(chan messages.Wal2JsonChanges),
-		snapshotMessages:           make(chan messages.Wal2JsonChanges, 100),
+		messages:                   make(chan Wal2JsonChanges),
+		snapshotMessages:           make(chan Wal2JsonChanges, 100),
 		slotName:                   config.ReplicationSlotName,
 		schema:                     config.DbSchema,
 		tableSchemas:               dataSchemas,
@@ -297,7 +296,7 @@ func (s *Stream) streamMessagesAsync() {
 					s.logger.Fatalf("ParseXLogData failed: %s", err.Error())
 				}
 				clientXLogPos := xld.WALStart + pglogrepl.LSN(len(xld.WALData))
-				s.changeFilter.FilterChange(clientXLogPos.String(), xld.WALData, func(change messages.Wal2JsonChanges) {
+				s.changeFilter.FilterChange(clientXLogPos.String(), xld.WALData, func(change Wal2JsonChanges) {
 					s.messages <- change
 				})
 			}
@@ -366,9 +365,9 @@ func (s *Stream) processSnapshot() {
 
 					scalar.AppendToBuilder(builder.Field(i), s)
 				}
-				var snapshotChanges = messages.Wal2JsonChanges{
+				var snapshotChanges = Wal2JsonChanges{
 					Lsn: "",
-					Changes: []messages.Wal2JsonChange{
+					Changes: []Wal2JsonChange{
 						{
 							Kind:   "insert",
 							Schema: s.schema,
@@ -409,11 +408,11 @@ func (s *Stream) OnMessage(callback OnMessage) {
 	}
 }
 
-func (s *Stream) SnapshotMessageC() chan messages.Wal2JsonChanges {
+func (s *Stream) SnapshotMessageC() chan Wal2JsonChanges {
 	return s.snapshotMessages
 }
 
-func (s *Stream) LrMessageC() chan messages.Wal2JsonChanges {
+func (s *Stream) LrMessageC() chan Wal2JsonChanges {
 	return s.messages
 }
 

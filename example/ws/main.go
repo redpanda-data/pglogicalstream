@@ -4,7 +4,6 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 	"github.com/usedatabrew/pglogicalstream"
-	"github.com/usedatabrew/pglogicalstream/messages"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 )
@@ -32,7 +31,7 @@ func main() {
 	}
 	defer wsClient.Close()
 
-	pgStream.OnMessage(func(message messages.Wal2JsonChanges) {
+	pgStream.OnMessage(func(message pglogicalstream.Wal2JsonChanges) {
 		marshaledChanges, err := message.Changes[0].Row.MarshalJSON()
 		if err != nil {
 			panic(err)
