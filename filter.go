@@ -1,4 +1,4 @@
-package replication
+package pglogicalstream
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"github.com/apache/arrow/go/v14/arrow/memory"
 	"github.com/cloudquery/plugin-sdk/v4/scalar"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
-	"github.com/usedatabrew/pglogicalstream/messages"
 	"strings"
 )
 
@@ -18,7 +17,7 @@ type ChangeFilter struct {
 	schemaWhiteList string
 }
 
-type Filtered func(change messages.Wal2JsonChanges)
+type Filtered func(change Wal2JsonChanges)
 
 func NewChangeFilter(tableSchemas []schemas.DataTableSchema, schema string) ChangeFilter {
 	tablesMap := map[string]*arrow.Schema{}
@@ -43,9 +42,9 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 	}
 
 	for _, ch := range changes.Change {
-		var filteredChanges = messages.Wal2JsonChanges{
+		var filteredChanges = Wal2JsonChanges{
 			Lsn:     lsn,
-			Changes: []messages.Wal2JsonChange{},
+			Changes: []Wal2JsonChange{},
 		}
 		if ch.Schema != c.schemaWhiteList {
 			continue
@@ -84,7 +83,7 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 			scalar.AppendToBuilder(builder.Field(i), s)
 		}
 
-		filteredChanges.Changes = append(filteredChanges.Changes, messages.Wal2JsonChange{
+		filteredChanges.Changes = append(filteredChanges.Changes, Wal2JsonChange{
 			Kind:   ch.Kind,
 			Schema: ch.Schema,
 			Table:  ch.Table,

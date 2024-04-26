@@ -1,4 +1,4 @@
-package replication
+package pglogicalstream
 
 type WallMessage struct {
 	Change []struct {

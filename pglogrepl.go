@@ -1,4 +1,4 @@
-package replication
+package pglogicalstream
 
 // Package pglogrepl implements PostgreSQL logical replication client functionality.
 //
