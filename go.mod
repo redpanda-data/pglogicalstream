@@ -10,7 +10,7 @@ require (
 	github.com/cloudquery/plugin-sdk/v4 v4.16.1
 	github.com/gorilla/websocket v1.5.0
 	github.com/jackc/pgio v1.0.0
-	github.com/jackc/pglogrepl v0.0.0-20230826184802-9ed16cb201f6
+	github.com/jackc/pglogrepl v0.0.0-20240307033717-828fbfe908e9
 	github.com/jackc/pgx/v5 v5.5.4
 	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.8.4
