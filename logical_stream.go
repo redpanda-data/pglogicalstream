@@ -4,20 +4,18 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/apache/arrow/go/v14/arrow"
-	"github.com/apache/arrow/go/v14/arrow/array"
-	"github.com/apache/arrow/go/v14/arrow/memory"
 	"github.com/charmbracelet/log"
-	"github.com/cloudquery/plugin-sdk/v4/scalar"
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
-	"os"
-	"strings"
-	"time"
 )
 
 const outputPlugin = "wal2json"
@@ -41,7 +39,6 @@ type Stream struct {
 	lsnrestart                 pglogrepl.LSN
 	slotName                   string
 	schema                     string
-	tableSchemas               []schemas.DataTableSchema
 	tableNames                 []string
 	separateChanges            bool
 	snapshotBatchSize          int
@@ -118,7 +115,6 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		snapshotMessages:           make(chan Wal2JsonChanges, 100),
 		slotName:                   config.ReplicationSlotName,
 		schema:                     config.DbSchema,
-		tableSchemas:               dataSchemas,
 		snapshotMemorySafetyFactor: config.SnapshotMemorySafetyFactor,
 		separateChanges:            config.SeparateChanges,
 		snapshotBatchSize:          config.BatchSize,
@@ -319,29 +315,22 @@ func (s *Stream) processSnapshot() {
 		snapshotter.CloseConn()
 	}()
 
-	for _, table := range s.tableSchemas {
+	for _, table := range s.tableNames {
 		s.logger.Info("Processing database snapshot", "schema", s.schema, "table", table)
 
 		var offset = 0
 
-		pk, err := s.getPrimaryKeyColumn(table.TableName)
+		pk, err := s.getPrimaryKeyColumn(table)
 		if err != nil {
 			s.logger.Fatalf("Failed to resolve pk %s", err.Error())
 		}
 
 		s.logger.Info("Query snapshot", "batch-size", s.snapshotBatchSize)
-		builder := array.NewRecordBuilder(memory.DefaultAllocator, table.Schema)
-
-		colNames := make([]string, 0, len(table.Schema.Fields()))
-
-		for _, col := range table.Schema.Fields() {
-			colNames = append(colNames, pgx.Identifier{col.Name}.Sanitize())
-		}
 
 		for {
 			var snapshotRows pgx.Rows
-			s.logger.Info("Query snapshot: ", "table", table.TableName, "columns", colNames, "batch-size", s.snapshotBatchSize, "offset", offset)
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table.TableName, colNames, pk, s.snapshotBatchSize, offset); err != nil {
+			s.logger.Info("Query snapshot: ", "table", table, "batch-size", s.snapshotBatchSize, "offset", offset)
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table, pk, s.snapshotBatchSize, offset); err != nil {
 				s.logger.Errorf("Failed to query snapshot data %s", err.Error())
 				s.cleanUpOnFailure()
 				os.Exit(1)
@@ -356,22 +345,14 @@ func (s *Stream) processSnapshot() {
 					panic(err)
 				}
 
-				for i, v := range values {
-					s := scalar.NewScalar(table.Schema.Field(i).Type)
-					if err := s.Set(v); err != nil {
-						panic(err)
-					}
-
-					scalar.AppendToBuilder(builder.Field(i), s)
-				}
 				var snapshotChanges = Wal2JsonChanges{
 					Lsn: "",
 					Changes: []Wal2JsonChange{
 						{
 							Kind:   "insert",
 							Schema: s.schema,
-							Table:  strings.Split(table.TableName, ".")[1],
-							Row:    builder.NewRecord(),
+							Table:  strings.Split(table, ".")[1],
+							Row:    values,
 						},
 					},
 				}
@@ -432,7 +413,7 @@ func (s *Stream) getPrimaryKeyColumn(tableName string) (string, error) {
 		JOIN   pg_attribute a ON a.attrelid = i.indrelid
 							 AND a.attnum = ANY(i.indkey)
 		WHERE  i.indrelid = '%s'::regclass
-		AND    i.indisprimary;	
+		AND    i.indisprimary;
 	`, strings.Split(tableName, ".")[1])
 
 	reader := s.pgConn.Exec(context.Background(), q)

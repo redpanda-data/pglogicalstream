@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
-	"log"
-	"strings"
 )
 
 type Snapshotter struct {
@@ -77,9 +77,8 @@ func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory u
 	return batchSize
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string, columns []string, pk string, limit, offset int) (rows pgx.Rows, err error) {
-	joinedColumns := strings.Join(columns, ", ")
-	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT %d OFFSET %d;", joinedColumns, table, pk, limit, offset))
+func (s *Snapshotter) QuerySnapshotData(table string, pk string, limit, offset int) (rows pgx.Rows, err error) {
+	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {

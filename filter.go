@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/apache/arrow/go/v14/arrow"
-	"github.com/apache/arrow/go/v14/arrow/array"
-	"github.com/apache/arrow/go/v14/arrow/memory"
-	"github.com/cloudquery/plugin-sdk/v4/scalar"
-	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 	"strings"
+
+	"github.com/apache/arrow/go/v14/arrow"
+	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 )
 
 type ChangeFilter struct {
@@ -50,44 +48,15 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 			continue
 		}
 
-		var (
-			arrowTableSchema *arrow.Schema
-			tableExist       bool
-		)
-
-		if arrowTableSchema, tableExist = c.tablesWhiteList[ch.Table]; !tableExist {
+		if _, tableExist := c.tablesWhiteList[ch.Table]; !tableExist {
 			continue
-		}
-
-		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowTableSchema)
-		changesMap := map[string]interface{}{}
-		if ch.Kind == "delete" {
-			for i, changedValue := range ch.Oldkeys.Keyvalues {
-				changesMap[ch.Oldkeys.Keynames[i]] = changedValue
-			}
-		} else {
-			for i, changedValue := range ch.Columnvalues {
-				changesMap[ch.Columnnames[i]] = changedValue
-			}
-		}
-
-		arrowSchema := c.tablesWhiteList[ch.Table]
-		for i, arrowField := range arrowSchema.Fields() {
-			fieldName := arrowField.Name
-			value := changesMap[fieldName]
-			s := scalar.NewScalar(arrowSchema.Field(i).Type)
-			if err := s.Set(value); err != nil {
-				panic(fmt.Errorf("error setting value for column %s: %w", arrowField.Name, err))
-			}
-
-			scalar.AppendToBuilder(builder.Field(i), s)
 		}
 
 		filteredChanges.Changes = append(filteredChanges.Changes, Wal2JsonChange{
 			Kind:   ch.Kind,
 			Schema: ch.Schema,
 			Table:  ch.Table,
-			Row:    builder.NewRecord(),
+			Row:    ch,
 		})
 
 		OnFiltered(filteredChanges)

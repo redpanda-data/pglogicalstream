@@ -76,7 +76,6 @@ func (s *lsnSuite) TestValueInterface() {
 }
 
 const slotName = "pglogrepl_test"
-const outputPlugin = "test_decoding"
 
 func closeConn(t testing.TB, conn *pgconn.PgConn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
