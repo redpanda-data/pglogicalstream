@@ -105,7 +105,3 @@ pgStream, err := pglogicalstream.NewPgStream(config, checkPointer)
 ## Contributing
 
 We welcome contributions from the Go community!
-
-### License
-
-This project is licensed under the [MIT License](LICENSE).
