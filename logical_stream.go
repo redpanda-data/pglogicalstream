@@ -4,6 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
 	"github.com/apache/arrow/go/v14/arrow/memory"
@@ -15,12 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
 	"github.com/usedatabrew/pglogicalstream/internal/schemas"
-	"os"
-	"strings"
-	"time"
 )
-
-const outputPlugin = "wal2json"
 
 var pluginArguments = []string{"\"pretty-print\" 'true'"}
 
@@ -432,7 +431,7 @@ func (s *Stream) getPrimaryKeyColumn(tableName string) (string, error) {
 		JOIN   pg_attribute a ON a.attrelid = i.indrelid
 							 AND a.attnum = ANY(i.indkey)
 		WHERE  i.indrelid = '%s'::regclass
-		AND    i.indisprimary;	
+		AND    i.indisprimary;
 	`, strings.Split(tableName, ".")[1])
 
 	reader := s.pgConn.Exec(context.Background(), q)
