@@ -1,19 +1,16 @@
 package pglogicalstream
 
-import (
-	"github.com/apache/arrow/go/v14/arrow"
-)
-
 type Wal2JsonChanges struct {
-	Lsn     string
+	Lsn     *string          `json:"lsn"`
 	Changes []Wal2JsonChange `json:"change"`
 }
 
 type Wal2JsonChange struct {
-	Kind   string       `json:"action"`
-	Schema string       `json:"schema"`
-	Table  string       `json:"table"`
-	Row    arrow.Record `json:"data"`
+	Kind         string        `json:"kind"`
+	Schema       string        `json:"schema"`
+	Table        string        `json:"table"`
+	ColumnNames  []string      `json:"columnnames"`
+	ColumnTypes  []string      `json:"columntypes"`
+	ColumnValues []interface{} `json:"columnvalues"`
 }
-
 type OnMessage = func(message Wal2JsonChanges)

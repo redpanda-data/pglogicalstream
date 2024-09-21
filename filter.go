@@ -4,25 +4,22 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/apache/arrow/go/v14/arrow"
-	"github.com/apache/arrow/go/v14/arrow/array"
-	"github.com/apache/arrow/go/v14/arrow/memory"
-	"github.com/cloudquery/plugin-sdk/v4/scalar"
-	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 	"strings"
+
+	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 )
 
 type ChangeFilter struct {
-	tablesWhiteList map[string]*arrow.Schema
+	tablesWhiteList map[string]bool
 	schemaWhiteList string
 }
 
 type Filtered func(change Wal2JsonChanges)
 
 func NewChangeFilter(tableSchemas []schemas.DataTableSchema, schema string) ChangeFilter {
-	tablesMap := map[string]*arrow.Schema{}
+	tablesMap := map[string]bool{}
 	for _, table := range tableSchemas {
-		tablesMap[strings.Split(table.TableName, ".")[1]] = table.Schema
+		tablesMap[strings.Split(table.TableName, ".")[1]] = true
 	}
 
 	return ChangeFilter{
@@ -43,7 +40,7 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 
 	for _, ch := range changes.Change {
 		var filteredChanges = Wal2JsonChanges{
-			Lsn:     lsn,
+			Lsn:     &lsn,
 			Changes: []Wal2JsonChange{},
 		}
 		if ch.Schema != c.schemaWhiteList {
@@ -51,43 +48,26 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 		}
 
 		var (
-			arrowTableSchema *arrow.Schema
-			tableExist       bool
+			tableExist bool
 		)
 
-		if arrowTableSchema, tableExist = c.tablesWhiteList[ch.Table]; !tableExist {
+		if _, tableExist = c.tablesWhiteList[ch.Table]; !tableExist {
 			continue
 		}
 
-		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowTableSchema)
-		changesMap := map[string]interface{}{}
 		if ch.Kind == "delete" {
 			for i, changedValue := range ch.Oldkeys.Keyvalues {
-				changesMap[ch.Oldkeys.Keynames[i]] = changedValue
+				ch.Columnvalues[i] = changedValue
 			}
-		} else {
-			for i, changedValue := range ch.Columnvalues {
-				changesMap[ch.Columnnames[i]] = changedValue
-			}
-		}
-
-		arrowSchema := c.tablesWhiteList[ch.Table]
-		for i, arrowField := range arrowSchema.Fields() {
-			fieldName := arrowField.Name
-			value := changesMap[fieldName]
-			s := scalar.NewScalar(arrowSchema.Field(i).Type)
-			if err := s.Set(value); err != nil {
-				panic(fmt.Errorf("error setting value for column %s: %w", arrowField.Name, err))
-			}
-
-			scalar.AppendToBuilder(builder.Field(i), s)
 		}
 
 		filteredChanges.Changes = append(filteredChanges.Changes, Wal2JsonChange{
-			Kind:   ch.Kind,
-			Schema: ch.Schema,
-			Table:  ch.Table,
-			Row:    builder.NewRecord(),
+			Kind:         ch.Kind,
+			Schema:       ch.Schema,
+			Table:        ch.Table,
+			ColumnNames:  ch.Columnnames,
+			ColumnTypes:  ch.Columntypes,
+			ColumnValues: ch.Columnvalues,
 		})
 
 		OnFiltered(filteredChanges)

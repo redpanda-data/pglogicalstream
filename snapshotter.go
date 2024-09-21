@@ -1,18 +1,16 @@
 package pglogicalstream
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
-	"github.com/jackc/pgx/v5"
+	"log"
+
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
-	"log"
-	"strings"
 )
 
 type Snapshotter struct {
-	pgConnection *pgx.Conn
+	pgConnection *sql.DB
 	snapshotName string
 }
 
@@ -26,7 +24,7 @@ func NewSnapshotter(dbConf pgconn.Config, snapshotName string) (*Snapshotter, er
 		dbConf.Password, dbConf.Host, dbConf.Port, dbConf.Database, sslMode,
 	)
 
-	pgConn, err := pgx.Connect(context.Background(), connStr)
+	pgConn, err := sql.Open("postgres", connStr)
 
 	return &Snapshotter{
 		pgConnection: pgConn,
@@ -35,15 +33,11 @@ func NewSnapshotter(dbConf pgconn.Config, snapshotName string) (*Snapshotter, er
 }
 
 func (s *Snapshotter) Prepare() error {
-	if res, err := s.pgConnection.Exec(context.TODO(), "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;"); err != nil {
+	if _, err := s.pgConnection.Exec("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;"); err != nil {
 		return err
-	} else {
-		fmt.Println(res.String())
 	}
-	if res, err := s.pgConnection.Exec(context.TODO(), fmt.Sprintf("SET TRANSACTION SNAPSHOT '%s';", s.snapshotName)); err != nil {
+	if _, err := s.pgConnection.Exec(fmt.Sprintf("SET TRANSACTION SNAPSHOT '%s';", s.snapshotName)); err != nil {
 		return err
-	} else {
-		fmt.Println(res.RowsAffected())
 	}
 
 	return nil
@@ -52,7 +46,7 @@ func (s *Snapshotter) Prepare() error {
 func (s *Snapshotter) FindAvgRowSize(table string) sql.NullInt64 {
 	var avgRowSize sql.NullInt64
 
-	if rows, err := s.pgConnection.Query(context.TODO(), fmt.Sprintf(`SELECT SUM(pg_column_size('%s.*')) / COUNT(*) FROM %s;`, table, table)); err != nil {
+	if rows, err := s.pgConnection.Query(fmt.Sprintf(`SELECT SUM(pg_column_size('%s.*')) / COUNT(*) FROM %s;`, table, table)); err != nil {
 		log.Fatal("Can get avg row size", err)
 	} else {
 		if rows.Next() {
@@ -67,9 +61,10 @@ func (s *Snapshotter) FindAvgRowSize(table string) sql.NullInt64 {
 	return avgRowSize
 }
 
-func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory uint64, estimatedRowSize uint64) int {
+func (s *Snapshotter) CalculateBatchSize(availableMemory uint64, estimatedRowSize uint64) int {
 	// Adjust this factor based on your system's memory constraints.
 	// This example uses a safety factor of 0.8 to leave some memory headroom.
+	safetyFactor := 0.6
 	batchSize := int(float64(availableMemory) * safetyFactor / float64(estimatedRowSize))
 	if batchSize < 1 {
 		batchSize = 1
@@ -77,19 +72,19 @@ func (s *Snapshotter) CalculateBatchSize(safetyFactor float64, availableMemory u
 	return batchSize
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string, columns []string, pk string, limit, offset int) (rows pgx.Rows, err error) {
-	joinedColumns := strings.Join(columns, ", ")
-	return s.pgConnection.Query(context.TODO(), fmt.Sprintf("SELECT %s FROM %s ORDER BY %s LIMIT %d OFFSET %d;", joinedColumns, table, pk, limit, offset))
+func (s *Snapshotter) QuerySnapshotData(table string, limit, offset int) (rows *sql.Rows, err error) {
+	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
+	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {
-	_, err := s.pgConnection.Exec(context.TODO(), "COMMIT;")
+	_, err := s.pgConnection.Exec("COMMIT;")
 	return err
 }
 
 func (s *Snapshotter) CloseConn() error {
 	if s.pgConnection != nil {
-		return s.pgConnection.Close(context.TODO())
+		return s.pgConnection.Close()
 	}
 
 	return nil
