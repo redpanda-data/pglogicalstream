@@ -18,11 +18,14 @@ func NewSnapshotter(dbConf pgconn.Config, snapshotName string) (*Snapshotter, er
 	var sslMode = "none"
 	if dbConf.TLSConfig != nil {
 		sslMode = "require"
+	} else {
+		sslMode = "disable"
 	}
-
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", dbConf.User,
+	connStr := fmt.Sprintf("user=%s password=%s host=%s port=%d dbname=%s sslmode=%s", dbConf.User,
 		dbConf.Password, dbConf.Host, dbConf.Port, dbConf.Database, sslMode,
 	)
+
+	fmt.Println("Conn string", connStr)
 
 	pgConn, err := sql.Open("postgres", connStr)
 
