@@ -71,6 +71,8 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 			InsecureSkipVerify: true,
 			ServerName:         config.DbHost,
 		}
+	} else {
+		cfg.TLSConfig = nil
 	}
 
 	dbConn, err := pgconn.ConnectConfig(context.Background(), cfg)
