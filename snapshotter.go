@@ -3,7 +3,8 @@ package pglogicalstream
 import (
 	"database/sql"
 	"fmt"
-	"log"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/lib/pq"
@@ -24,8 +25,6 @@ func NewSnapshotter(dbConf pgconn.Config, snapshotName string) (*Snapshotter, er
 	connStr := fmt.Sprintf("user=%s password=%s host=%s port=%d dbname=%s sslmode=%s", dbConf.User,
 		dbConf.Password, dbConf.Host, dbConf.Port, dbConf.Database, sslMode,
 	)
-
-	fmt.Println("Conn string", connStr)
 
 	pgConn, err := sql.Open("postgres", connStr)
 
@@ -76,7 +75,8 @@ func (s *Snapshotter) CalculateBatchSize(availableMemory uint64, estimatedRowSiz
 }
 
 func (s *Snapshotter) QuerySnapshotData(table string, pk string, limit, offset int) (rows *sql.Rows, err error) {
-	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset))
+	// fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset)
+	log.WithPrefix("[pg-stream/snapshotter]").Info("Query snapshot", "table", table, "limit", limit, "offset", offset, "pk", pk)
 	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset))
 }
 

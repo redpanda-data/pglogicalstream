@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -24,9 +26,11 @@ type Stream struct {
 	pgConn *pgconn.PgConn
 	// extra copy of db config is required to establish a new db connection
 	// which is required to take snapshot data
-	dbConfig                   pgconn.Config
-	ctx                        context.Context
-	cancel                     context.CancelFunc
+	dbConfig     pgconn.Config
+	streamCtx    context.Context
+	streamCancel context.CancelFunc
+
+	standbyCtxCancel           context.CancelFunc
 	clientXLogPos              pglogrepl.LSN
 	standbyMessageTimeout      time.Duration
 	nextStandbyMessageDeadline time.Time
@@ -42,9 +46,12 @@ type Stream struct {
 	snapshotBatchSize          int
 	snapshotMemorySafetyFactor float64
 	logger                     *log.Logger
+
+	m       sync.Mutex
+	stopped bool
 }
 
-func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
+func NewPgStream(config Config) (*Stream, error) {
 	var (
 		cfg *pgconn.Config
 		err error
@@ -97,7 +104,9 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		snapshotBatchSize:          config.BatchSize,
 		tableNames:                 tableNames,
 		changeFilter:               NewChangeFilter(tableNames, config.DbSchema),
-		logger:                     logger,
+		logger:                     log.WithPrefix("[pg-stream]"),
+		m:                          sync.Mutex{},
+		stopped:                    false,
 	}
 
 	result := stream.pgConn.Exec(context.Background(), fmt.Sprintf("DROP PUBLICATION IF EXISTS pglog_stream_%s;", config.ReplicationSlotName))
@@ -106,7 +115,6 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		stream.logger.Errorf("drop publication if exists error %s", err.Error())
 	}
 
-	// TODO:: ADD Tables filter
 	for i, table := range tableNames {
 		tableNames[i] = fmt.Sprintf("%s.%s", config.DbSchema, table)
 	}
@@ -170,7 +178,7 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 
 	stream.standbyMessageTimeout = time.Second * 10
 	stream.nextStandbyMessageDeadline = time.Now().Add(stream.standbyMessageTimeout)
-	stream.ctx, stream.cancel = context.WithCancel(context.Background())
+	stream.streamCtx, stream.streamCancel = context.WithCancel(context.Background())
 
 	if !freshlyCreatedSlot || config.StreamOldData == false {
 		stream.startLr()
@@ -215,8 +223,8 @@ func (s *Stream) AckLSN(lsn string) {
 func (s *Stream) streamMessagesAsync() {
 	for {
 		select {
-		case <-s.ctx.Done():
-			s.cancel()
+		case <-s.streamCtx.Done():
+			s.logger.Warn("Stream was cancelled...exiting...")
 			return
 		default:
 			if time.Now().After(s.nextStandbyMessageDeadline) {
@@ -234,11 +242,18 @@ func (s *Stream) streamMessagesAsync() {
 
 			ctx, cancel := context.WithDeadline(context.Background(), s.nextStandbyMessageDeadline)
 			rawMsg, err := s.pgConn.ReceiveMessage(ctx)
-			s.cancel = cancel
+			s.standbyCtxCancel = cancel
+
+			if err != nil && (errors.Is(err, context.Canceled) || s.stopped) {
+				s.logger.Warn("Service was interrpupted....stop reading from replication slot")
+				return
+			}
+
 			if err != nil {
 				if pgconn.Timeout(err) {
 					continue
 				}
+
 				s.logger.Fatalf("Failed to receive messages from PostgreSQL %s", err.Error())
 			}
 
@@ -288,12 +303,12 @@ func (s *Stream) streamMessagesAsync() {
 func (s *Stream) processSnapshot() {
 	snapshotter, err := NewSnapshotter(s.dbConfig, s.snapshotName)
 	if err != nil {
-		s.logger.Errorf("Failed to create database snapshot: %", err.Error())
+		s.logger.Errorf("Failed to create database snapshot: %v", err.Error())
 		s.cleanUpOnFailure()
 		os.Exit(1)
 	}
 	if err = snapshotter.Prepare(); err != nil {
-		s.logger.Errorf("Failed to prepare database snapshot: %", err.Error())
+		s.logger.Errorf("Failed to prepare database snapshot: %v", err.Error())
 		s.cleanUpOnFailure()
 		os.Exit(1)
 	}
@@ -303,17 +318,16 @@ func (s *Stream) processSnapshot() {
 	}()
 
 	for _, table := range s.tableNames {
-		log.Printf("Processing snapshot for a table %s", table)
+		s.logger.Info("Processing snapshot for table", "table", table)
 
 		var (
 			avgRowSizeBytes sql.NullInt64
 			offset          = int(0)
 		)
 		avgRowSizeBytes = snapshotter.FindAvgRowSize(table)
-		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
 		batchSize := snapshotter.CalculateBatchSize(helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
-		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
+		s.logger.Info("Querying snapshot", "batch_side", batchSize, "available_memory", helpers.GetAvailableMemory(), "avg_row_size", avgRowSizeBytes.Int64)
 
 		tablePk, err := s.getPrimaryKeyColumn(table)
 		if err != nil {
@@ -427,7 +441,7 @@ func (s *Stream) OnMessage(callback OnMessage) {
 			callback(snapshotMessage)
 		case message := <-s.messages:
 			callback(message)
-		case <-s.ctx.Done():
+		case <-s.streamCtx.Done():
 			return
 		}
 	}
@@ -473,12 +487,16 @@ func (s *Stream) getPrimaryKeyColumn(tableName string) (string, error) {
 }
 
 func (s *Stream) Stop() error {
-	if s.pgConn != nil {
-		if s.ctx != nil {
-			s.cancel()
-		}
+	s.m.Lock()
+	s.stopped = true
+	s.m.Unlock()
 
-		return s.pgConn.Close(context.TODO())
+	if s.pgConn != nil {
+		if s.streamCtx != nil {
+			s.streamCancel()
+			s.standbyCtxCancel()
+		}
+		return s.pgConn.Close(context.Background())
 	}
 
 	return nil

@@ -21,7 +21,7 @@ func main() {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 
-	pgStream, err := pglogicalstream.NewPgStream(config, log.WithPrefix("pg-cdc"))
+	pgStream, err := pglogicalstream.NewPgStream(config)
 	if err != nil {
 		panic(err)
 	}
