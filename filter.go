@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
-
-	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 )
 
 type ChangeFilter struct {
@@ -16,10 +13,10 @@ type ChangeFilter struct {
 
 type Filtered func(change Wal2JsonChanges)
 
-func NewChangeFilter(tableSchemas []schemas.DataTableSchema, schema string) ChangeFilter {
+func NewChangeFilter(tableSchemas []string, schema string) ChangeFilter {
 	tablesMap := map[string]bool{}
 	for _, table := range tableSchemas {
-		tablesMap[strings.Split(table.TableName, ".")[1]] = true
+		tablesMap[table] = true
 	}
 
 	return ChangeFilter{
@@ -50,7 +47,7 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 		var (
 			tableExist bool
 		)
-
+		fmt.Println(ch.Table, c.tablesWhiteList)
 		if _, tableExist = c.tablesWhiteList[ch.Table]; !tableExist {
 			continue
 		}

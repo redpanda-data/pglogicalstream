@@ -72,9 +72,9 @@ func (s *Snapshotter) CalculateBatchSize(availableMemory uint64, estimatedRowSiz
 	return batchSize
 }
 
-func (s *Snapshotter) QuerySnapshotData(table string, limit, offset int) (rows *sql.Rows, err error) {
-	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
-	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d;", table, limit, offset))
+func (s *Snapshotter) QuerySnapshotData(table string, pk string, limit, offset int) (rows *sql.Rows, err error) {
+	fmt.Println("Query snapshot: ", fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset))
+	return s.pgConnection.Query(fmt.Sprintf("SELECT * FROM %s ORDER BY %s LIMIT %d OFFSET %d;", table, pk, limit, offset))
 }
 
 func (s *Snapshotter) ReleaseSnapshot() error {

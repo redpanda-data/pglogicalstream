@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/usedatabrew/pglogicalstream/internal/helpers"
-	"github.com/usedatabrew/pglogicalstream/internal/schemas"
 )
 
 var pluginArguments = []string{"\"pretty-print\" 'true'"}
@@ -78,9 +77,8 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 	}
 
 	var tableNames []string
-	var dataSchemas []schemas.DataTableSchema
-	for _, table := range config.DbTablesSchema {
-		tableNames = append(tableNames, strings.Split(table.Table, ".")[1])
+	for _, table := range config.DbTables {
+		tableNames = append(tableNames, table)
 	}
 
 	stream := &Stream{
@@ -94,7 +92,7 @@ func NewPgStream(config Config, logger *log.Logger) (*Stream, error) {
 		separateChanges:            config.SeparateChanges,
 		snapshotBatchSize:          config.BatchSize,
 		tableNames:                 tableNames,
-		changeFilter:               NewChangeFilter(dataSchemas, config.DbSchema),
+		changeFilter:               NewChangeFilter(tableNames, config.DbSchema),
 		logger:                     logger,
 	}
 
@@ -297,17 +295,20 @@ func (s *Stream) processSnapshot() {
 			avgRowSizeBytes sql.NullInt64
 			offset          = int(0)
 		)
-		// extract only the name of the table
-		rawTableName := strings.Split(table, ".")[1]
-		avgRowSizeBytes = snapshotter.FindAvgRowSize(rawTableName)
+		avgRowSizeBytes = snapshotter.FindAvgRowSize(table)
 		fmt.Println(avgRowSizeBytes, offset, "AVG SIZES")
 
 		batchSize := snapshotter.CalculateBatchSize(helpers.GetAvailableMemory(), uint64(avgRowSizeBytes.Int64))
 		fmt.Println("Query with batch size", batchSize, "Available memory: ", helpers.GetAvailableMemory(), "Avg row size: ", avgRowSizeBytes.Int64)
 
+		tablePk, err := s.getPrimaryKeyColumn(table)
+		if err != nil {
+			panic(err)
+		}
+
 		for {
 			var snapshotRows *sql.Rows
-			if snapshotRows, err = snapshotter.QuerySnapshotData(table, batchSize, offset); err != nil {
+			if snapshotRows, err = snapshotter.QuerySnapshotData(table, tablePk, batchSize, offset); err != nil {
 				log.Fatalf("Can't query snapshot data %v", err)
 			}
 
@@ -444,7 +445,7 @@ func (s *Stream) getPrimaryKeyColumn(tableName string) (string, error) {
 							 AND a.attnum = ANY(i.indkey)
 		WHERE  i.indrelid = '%s'::regclass
 		AND    i.indisprimary;
-	`, strings.Split(tableName, ".")[1])
+	`, tableName)
 
 	reader := s.pgConn.Exec(context.Background(), q)
 	data, err := reader.ReadAll()
