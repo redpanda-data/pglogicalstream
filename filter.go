@@ -1,11 +1,5 @@
 package pglogicalstream
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-)
-
 type ChangeFilter struct {
 	tablesWhiteList map[string]bool
 	schemaWhiteList string
@@ -25,12 +19,7 @@ func NewChangeFilter(tableSchemas []string, schema string) ChangeFilter {
 	}
 }
 
-func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtered) {
-	var changes WallMessage
-	if err := json.NewDecoder(bytes.NewReader(change)).Decode(&changes); err != nil {
-		panic(fmt.Errorf("cant parse change from database to filter it %v", err))
-	}
-
+func (c ChangeFilter) FilterChange(lsn string, changes WallMessage, OnFiltered Filtered) {
 	if len(changes.Change) == 0 {
 		return
 	}
@@ -47,13 +36,17 @@ func (c ChangeFilter) FilterChange(lsn string, change []byte, OnFiltered Filtere
 		var (
 			tableExist bool
 		)
-		fmt.Println(ch.Table, c.tablesWhiteList)
+
 		if _, tableExist = c.tablesWhiteList[ch.Table]; !tableExist {
 			continue
 		}
 
 		if ch.Kind == "delete" {
+			ch.Columnvalues = make([]interface{}, len(ch.Oldkeys.Keyvalues))
 			for i, changedValue := range ch.Oldkeys.Keyvalues {
+				if len(ch.Columnvalues) == 0 {
+					break
+				}
 				ch.Columnvalues[i] = changedValue
 			}
 		}

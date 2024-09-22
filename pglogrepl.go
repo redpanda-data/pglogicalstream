@@ -233,7 +233,7 @@ func CreateReplicationSlot(
 		snapshotString = options.SnapshotAction
 	}
 	sql := fmt.Sprintf("CREATE_REPLICATION_SLOT %s %s %s %s %s", slotName, temporaryString, options.Mode, outputPlugin, snapshotString)
-
+	fmt.Println(sql)
 	return ParseCreateReplicationSlot(conn.Exec(ctx, sql))
 }
 

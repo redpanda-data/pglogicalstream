@@ -1,9 +1,11 @@
 package pglogicalstream
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -196,8 +198,9 @@ func (s *Stream) AckLSN(lsn string) {
 	}
 
 	err = pglogrepl.SendStandbyStatusUpdate(context.Background(), s.pgConn, pglogrepl.StandbyStatusUpdate{
+		WALApplyPosition: s.clientXLogPos,
 		WALWritePosition: s.clientXLogPos,
-		WALFlushPosition: s.clientXLogPos,
+		ReplyRequested:   true,
 	})
 
 	if err != nil {
@@ -264,9 +267,18 @@ func (s *Stream) streamMessagesAsync() {
 					s.logger.Fatalf("ParseXLogData failed: %s", err.Error())
 				}
 				clientXLogPos := xld.WALStart + pglogrepl.LSN(len(xld.WALData))
-				s.changeFilter.FilterChange(clientXLogPos.String(), xld.WALData, func(change Wal2JsonChanges) {
-					s.messages <- change
-				})
+				var changes WallMessage
+				if err := json.NewDecoder(bytes.NewReader(xld.WALData)).Decode(&changes); err != nil {
+					panic(fmt.Errorf("cant parse change from database to filter it %v", err))
+				}
+
+				if len(changes.Change) == 0 {
+					s.AckLSN(clientXLogPos.String())
+				} else {
+					s.changeFilter.FilterChange(clientXLogPos.String(), changes, func(change Wal2JsonChanges) {
+						s.messages <- change
+					})
+				}
 			}
 		}
 	}
@@ -289,7 +301,7 @@ func (s *Stream) processSnapshot() {
 	}()
 
 	for _, table := range s.tableNames {
-		log.Printf("Processing snapshot for a table %s.%s", s.schema, table)
+		log.Printf("Processing snapshot for a table %s", table)
 
 		var (
 			avgRowSizeBytes sql.NullInt64

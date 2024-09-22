@@ -28,6 +28,9 @@ func main() {
 
 	pgStream.OnMessage(func(message pglogicalstream.Wal2JsonChanges) {
 		fmt.Println(message.Changes)
-		pgStream.AckLSN(*message.Lsn)
+		if message.Lsn != nil {
+			// Snapshots dont have LSN
+			pgStream.AckLSN(*message.Lsn)
+		}
 	})
 }
